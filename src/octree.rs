@@ -29,7 +29,16 @@ impl Octree {
         self.root.add_color(color, 1, self.max_level);
     }
 
-    pub fn build_palette() {}
+    pub fn build_palette(&mut self) {
+        self.root.traverse(|node| {
+            node.palette_index = self.palette.len();
+            self.palette.push(node.to_rgb());
+        });
+    }
+
+    pub fn get_color(color: &Rgb<u8>) -> Rgb<u8> {
+        todo!()
+    }
 }
 
 #[derive(Default)]
@@ -51,23 +60,28 @@ impl Node {
             self.count += 1;
         } else {
             let index = get_rgb_index(color, level) as usize;
-            if self.children[index].is_none() {
-                self.children[index] = Some(Box::new(Node::default()));
-            }
-            self.children[index]
-                .as_mut()
-                .expect("node should not be None")
-                .add_color(color, level + 1, max_level);
+            let child = self.children[index].get_or_insert(Box::new(Node::default()));
+            child.add_color(color, level + 1, max_level);
         }
     }
 
-    fn traverse(&self) {
-        for child in &self.children {
-            if let Some(child) = child {
-                if child.count > 0 {}
-                child.traverse();
+    fn traverse<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Self),
+    {
+        self.traverse_ref(&mut f);
+    }
+
+    fn traverse_ref<F>(&mut self, f: &mut F)
+    where
+        F: FnMut(&mut Self),
+    {
+        self.children.iter_mut().flatten().for_each(|child| {
+            if child.count > 0 {
+                f(child);
             }
-        }
+            child.traverse_ref(f);
+        })
     }
 
     fn to_rgb(&self) -> Rgb<u8> {
