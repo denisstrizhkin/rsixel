@@ -1,15 +1,15 @@
 mod octree;
 
 use self::octree::Octree;
-use image::{DynamicImage, GenericImageView};
+use image::DynamicImage;
 
 pub fn image_to_sixel(img: DynamicImage) -> Vec<u8> {
     let img = img.to_rgb8();
-    let mut octree = Octree::new();
+    let mut octree = Octree::new(8);
     img.pixels().for_each(|p| {
         octree.add_color(p);
     });
-    todo!();
+    Vec::new()
 }
 
 // func sixel_encode(img image.Image, w io.Writer) {
