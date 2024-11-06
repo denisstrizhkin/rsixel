@@ -1,6 +1,14 @@
-use image::DynamicImage;
+mod octree;
+
+use self::octree::Octree;
+use image::{DynamicImage, GenericImageView};
 
 pub fn image_to_sixel(img: DynamicImage) -> Vec<u8> {
+    let img = img.to_rgb8();
+    let mut octree = Octree::new();
+    img.pixels().for_each(|p| {
+        octree.add_color(p);
+    });
     todo!();
 }
 
