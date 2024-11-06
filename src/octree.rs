@@ -36,8 +36,16 @@ impl Octree {
         });
     }
 
-    pub fn get_color(color: &Rgb<u8>) -> Rgb<u8> {
-        todo!()
+    pub fn get_palette(&self) -> &[Rgb<u8>] {
+        &self.palette
+    }
+
+    pub fn get_palette_index(&self, color: &Rgb<u8>) -> usize {
+        self.root.get_palette_index(color, 1, self.max_level)
+    }
+
+    pub fn get_color(&self, color: &Rgb<u8>) -> &Rgb<u8> {
+        &self.palette[self.get_palette_index(color)]
     }
 }
 
@@ -82,6 +90,18 @@ impl Node {
             }
             child.traverse_ref(f);
         })
+    }
+
+    fn get_palette_index(&self, color: &Rgb<u8>, level: u8, max_level: u8) -> usize {
+        if level >= max_level && self.count == 0 {
+            self.palette_index
+        } else {
+            let index = get_rgb_index(color, level) as usize;
+            self.children[index]
+                .as_ref()
+                .expect("This should not happen, with healthy octree")
+                .get_palette_index(color, level + 1, max_level)
+        }
     }
 
     fn to_rgb(&self) -> Rgb<u8> {
