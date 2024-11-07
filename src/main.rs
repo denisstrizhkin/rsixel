@@ -16,7 +16,7 @@ struct Args {
 fn run(path: &Path) -> Result<(), Box<dyn Error>> {
     let img = ImageReader::open(path)?.decode()?;
     let mut stdout = stdout().lock();
-    let sixel_encoder = SixelEncoder;
+    let sixel_encoder = SixelEncoder {};
     sixel_encoder.image_to_sixel(img, &mut stdout)?;
     Ok(())
 }

@@ -3,6 +3,7 @@ mod octree;
 use self::octree::Octree;
 use image::{DynamicImage, ImageBuffer, Rgb};
 use std::io::{Error, Write};
+use std::time::SystemTime;
 
 #[derive(Default, Debug)]
 struct SixelBuf {
@@ -47,20 +48,31 @@ impl SixelBuf {
 }
 
 #[derive(Default)]
-pub struct SixelEncoder;
+pub struct SixelEncoder {}
 
 impl SixelEncoder {
     fn setup(&self, img: DynamicImage) -> (ImageBuffer<Rgb<u8>, Vec<u8>>, Octree) {
+        let start_time = SystemTime::now();
+
         let img = img.to_rgb8();
         let mut octree = Octree::new(3);
         img.pixels().for_each(|p| {
             octree.add_color(p);
         });
         octree.build_palette();
+
+        eprintln!(
+            "Build color palette: {} colors, {}ms",
+            octree.get_palette().len(),
+            start_time.elapsed().unwrap().as_millis()
+        );
+
         (img, octree)
     }
 
     pub fn image_to_sixel<W: Write>(&self, img: DynamicImage, w: &mut W) -> Result<(), Error> {
+        let start_time = SystemTime::now();
+
         let (img, octree) = self.setup(img);
         let width = img.width();
         let height = img.height();
