@@ -5,15 +5,14 @@ use image::DynamicImage;
 
 #[derive(Default, Debug)]
 struct SixelBuf {
-    align: u8,
+    align: u32,
     sixel: usize,
     count: usize,
     result: Option<String>,
-    is_ready: bool,
 }
 
 impl SixelBuf {
-    fn add(&mut self, sixel: usize, align: u8) {
+    fn add(&mut self, sixel: usize, align: u32) {
         self.align = align;
         if self.count == 0 {
             self.sixel = sixel;
@@ -25,7 +24,6 @@ impl SixelBuf {
         } else {
             self.count += 1;
         }
-        self.is_ready = true;
     }
 
     fn upd_result(&mut self) {
@@ -43,15 +41,13 @@ impl SixelBuf {
     }
 
     fn take(&mut self) -> Option<String> {
-        let result = self.result.take_if(|_| self.is_ready);
-        self.is_ready = result.is_none();
-        result
+        self.result.take()
     }
 }
 
 pub fn image_to_sixel(img: DynamicImage, debug: bool) -> Vec<u8> {
     let img = img.to_rgb8();
-    let mut octree = Octree::new(1);
+    let mut octree = Octree::new(3);
     img.pixels().for_each(|p| {
         octree.add_color(p);
     });
@@ -62,8 +58,8 @@ pub fn image_to_sixel(img: DynamicImage, debug: bool) -> Vec<u8> {
     let height = img.height();
     let mut sixels = Vec::new();
 
-    sixels.extend_from_slice(b"\x1bPq\"1;1;");
-    sixels.extend_from_slice(format!("{};{}", width, height).as_bytes());
+    sixels.extend_from_slice(format!("\x1bPq\"").as_bytes());
+    sixels.extend_from_slice(format!("1;1;{};{}", width, height).as_bytes());
     if debug {
         sixels.push(b'\n');
     }
@@ -86,19 +82,23 @@ pub fn image_to_sixel(img: DynamicImage, debug: bool) -> Vec<u8> {
     for i in 0..height {
         for j in 0..width {
             let p_i = octree.get_palette_index(img.get_pixel(j, i));
-            sixel_buf.add(p_i, i as u8);
+            sixel_buf.add(p_i, i);
             if let Some(sixel) = sixel_buf.take() {
+                // eprintln!("{i}, {j}");
                 sixels.extend_from_slice(sixel.as_bytes());
             }
         }
         sixel_buf.flush();
         if let Some(sixel) = sixel_buf.take() {
+            // eprintln!("flush");
             sixels.extend_from_slice(sixel.as_bytes());
         }
-        if i % 6 == 5 {
-            sixels.push(b'-');
-        } else {
-            sixels.push(b'$');
+        if i < height - 1 {
+            if i % 6 == 5 {
+                sixels.push(b'-');
+            } else {
+                sixels.push(b'$');
+            }
         }
         if debug {
             sixels.push(b'\n');

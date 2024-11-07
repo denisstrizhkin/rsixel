@@ -1,6 +1,6 @@
 use clap::Parser;
 use image::ImageReader;
-use sixel::image_to_sixel;
+use rsixel::image_to_sixel;
 use std::error::Error;
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
