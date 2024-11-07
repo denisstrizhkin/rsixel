@@ -15,7 +15,7 @@ struct Args {
 
 fn run(path: &Path) -> Result<(), Box<dyn Error>> {
     let img = ImageReader::open(path)?.decode()?;
-    let sixels = image_to_sixel(img);
+    let sixels = image_to_sixel(img, true);
     stdout().write_all(&sixels)?;
     Ok(())
 }
