@@ -26,10 +26,12 @@ impl Octree {
         }
     }
 
+    #[inline]
     pub fn add_color(&mut self, color: &Rgb<u8>) {
         self.root.add_color(color, 1, self.max_level);
     }
 
+    #[inline]
     pub fn build_palette(&mut self) {
         self.root.traverse(|node| {
             node.palette_index = self.palette.len();
@@ -37,14 +39,17 @@ impl Octree {
         });
     }
 
+    #[inline]
     pub fn get_palette(&self) -> &[Rgb<u8>] {
         &self.palette
     }
 
+    #[inline]
     pub fn get_palette_index(&self, color: &Rgb<u8>) -> usize {
         self.root.get_palette_index(color, 1, self.max_level)
     }
 
+    #[inline]
     pub fn _get_color(&self, color: &Rgb<u8>) -> &Rgb<u8> {
         &self.palette[self.get_palette_index(color)]
     }

@@ -1,7 +1,7 @@
 mod octree;
 
 use self::octree::Octree;
-use image::DynamicImage;
+use image::{DynamicImage, ImageBuffer, Rgb};
 use std::io::{Error, Write};
 
 #[derive(Default, Debug)]
@@ -46,65 +46,73 @@ impl SixelBuf {
     }
 }
 
-pub fn image_to_sixel<W: Write>(img: DynamicImage, w: &mut W) -> Result<(), Error> {
-    let img = img.to_rgb8();
-    let mut octree = Octree::new(3);
-    img.pixels().for_each(|p| {
-        octree.add_color(p);
-    });
-    octree.build_palette();
-    eprintln!("Palette size: {}", octree.get_palette().len());
+#[derive(Default)]
+pub struct SixelEncoder;
 
-    let width = img.width();
-    let height = img.height();
+impl SixelEncoder {
+    fn setup(&self, img: DynamicImage) -> (ImageBuffer<Rgb<u8>, Vec<u8>>, Octree) {
+        let img = img.to_rgb8();
+        let mut octree = Octree::new(3);
+        img.pixels().for_each(|p| {
+            octree.add_color(p);
+        });
+        octree.build_palette();
+        (img, octree)
+    }
 
-    write!(w, "\x1bPq\"")?;
-    write!(w, "1;1;{};{}", width, height)?;
-    // if debug {
-    //     sixels.push(b'\n');
-    // }
+    pub fn image_to_sixel<W: Write>(&self, img: DynamicImage, w: &mut W) -> Result<(), Error> {
+        let (img, octree) = self.setup(img);
+        let width = img.width();
+        let height = img.height();
 
-    octree
-        .get_palette()
-        .iter()
-        .enumerate()
-        .try_for_each(|(i, rgb)| {
-            let r = rgb[0] as u16 * 100 / 255;
-            let g = rgb[1] as u16 * 100 / 255;
-            let b = rgb[2] as u16 * 100 / 255;
-            write!(w, "#{};2;{};{};{}", i, r, g, b)
-        })?;
-    // if debug {
-    //     sixels.push(b'\n');
-    // }
-
-    let mut sixel_buf = SixelBuf::default();
-    for i in 0..height {
-        for j in 0..width {
-            let p_i = octree.get_palette_index(img.get_pixel(j, i));
-            sixel_buf.add(p_i, i);
-            if let Some(sixel) = sixel_buf.take() {
-                // eprintln!("{i}, {j}");
-                write!(w, "{sixel}")?;
-            }
-        }
-        sixel_buf.flush();
-        if let Some(sixel) = sixel_buf.take() {
-            // eprintln!("flush");
-            write!(w, "{sixel}")?;
-        }
-        if i < height - 1 {
-            if i % 6 == 5 {
-                write!(w, "-")?;
-            } else {
-                write!(w, "$")?;
-            }
-        }
+        write!(w, "\x1bPq\"")?;
+        write!(w, "1;1;{};{}", width, height)?;
         // if debug {
         //     sixels.push(b'\n');
         // }
-    }
 
-    write!(w, "\x1b\\")?;
-    Ok(())
+        octree
+            .get_palette()
+            .iter()
+            .enumerate()
+            .try_for_each(|(i, rgb)| {
+                let r = rgb[0] as u16 * 100 / 255;
+                let g = rgb[1] as u16 * 100 / 255;
+                let b = rgb[2] as u16 * 100 / 255;
+                write!(w, "#{};2;{};{};{}", i, r, g, b)
+            })?;
+        // if debug {
+        //     sixels.push(b'\n');
+        // }
+
+        let mut sixel_buf = SixelBuf::default();
+        for i in 0..height {
+            for j in 0..width {
+                let p_i = octree.get_palette_index(img.get_pixel(j, i));
+                sixel_buf.add(p_i, i);
+                if let Some(sixel) = sixel_buf.take() {
+                    // eprintln!("{i}, {j}");
+                    write!(w, "{sixel}")?;
+                }
+            }
+            sixel_buf.flush();
+            if let Some(sixel) = sixel_buf.take() {
+                // eprintln!("flush");
+                write!(w, "{sixel}")?;
+            }
+            if i < height - 1 {
+                if i % 6 == 5 {
+                    write!(w, "-")?;
+                } else {
+                    write!(w, "$")?;
+                }
+            }
+            // if debug {
+            //     sixels.push(b'\n');
+            // }
+        }
+
+        write!(w, "\x1b\\")?;
+        Ok(())
+    }
 }
