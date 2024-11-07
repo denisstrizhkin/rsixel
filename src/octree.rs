@@ -10,6 +10,7 @@ fn get_rgb_index(color: &Rgb<u8>, level: u8) -> u8 {
     (r << 2) + (g << 1) + b
 }
 
+#[derive(Debug)]
 pub struct Octree {
     max_level: u8,
     root: Node,
@@ -49,7 +50,7 @@ impl Octree {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Node {
     red: u64,
     green: u64,
@@ -61,7 +62,7 @@ struct Node {
 
 impl Node {
     fn add_color(&mut self, color: &Rgb<u8>, level: u8, max_level: u8) {
-        if level >= max_level {
+        if level > max_level {
             self.red += color[0] as u64;
             self.green += color[1] as u64;
             self.blue += color[2] as u64;
@@ -93,14 +94,18 @@ impl Node {
     }
 
     fn get_palette_index(&self, color: &Rgb<u8>, level: u8, max_level: u8) -> usize {
-        if level >= max_level && self.count == 0 {
+        if level > max_level {
             self.palette_index
         } else {
             let index = get_rgb_index(color, level) as usize;
-            self.children[index]
+            let child = self.children[index]
                 .as_ref()
-                .expect("This should not happen, with healthy octree")
-                .get_palette_index(color, level + 1, max_level)
+                .expect("This should not happen, with healthy octree");
+            if self.count != 0 {
+                child.palette_index
+            } else {
+                child.get_palette_index(color, level + 1, max_level)
+            }
         }
     }
 
