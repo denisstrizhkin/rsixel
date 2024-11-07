@@ -2,6 +2,11 @@
 name = "rsixel"
 version = "0.1.0"
 edition = "2021"
+authors = ["Denis Strizhkin strdenis02@gmail.com"]
+homepage = "https://github.com/denisstrizhkin/rsixel"
+repository = "https://github.com/denisstrizhkin/rsixel"
+description = "Tool and library for encoding images into sixel format"
+keywords = ["lib", "cli", "sixel"]
 
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
