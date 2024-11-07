@@ -2,7 +2,7 @@ use clap::Parser;
 use image::ImageReader;
 use rsixel::image_to_sixel;
 use std::error::Error;
-use std::io::{stdout, Write};
+use std::io::stdout;
 use std::path::{Path, PathBuf};
 
 /// Convert image to sixel format
@@ -15,8 +15,8 @@ struct Args {
 
 fn run(path: &Path) -> Result<(), Box<dyn Error>> {
     let img = ImageReader::open(path)?.decode()?;
-    let sixels = image_to_sixel(img, true);
-    stdout().write_all(&sixels)?;
+    let mut stdout = stdout().lock();
+    image_to_sixel(img, &mut stdout)?;
     Ok(())
 }
 

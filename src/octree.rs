@@ -45,7 +45,7 @@ impl Octree {
         self.root.get_palette_index(color, 1, self.max_level)
     }
 
-    pub fn get_color(&self, color: &Rgb<u8>) -> &Rgb<u8> {
+    pub fn _get_color(&self, color: &Rgb<u8>) -> &Rgb<u8> {
         &self.palette[self.get_palette_index(color)]
     }
 }

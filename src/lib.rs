@@ -2,6 +2,7 @@ mod octree;
 
 use self::octree::Octree;
 use image::DynamicImage;
+use std::io::{Error, Write};
 
 #[derive(Default, Debug)]
 struct SixelBuf {
@@ -45,7 +46,7 @@ impl SixelBuf {
     }
 }
 
-pub fn image_to_sixel(img: DynamicImage, debug: bool) -> Vec<u8> {
+pub fn image_to_sixel<W: Write>(img: DynamicImage, w: &mut W) -> Result<(), Error> {
     let img = img.to_rgb8();
     let mut octree = Octree::new(3);
     img.pixels().for_each(|p| {
@@ -56,27 +57,26 @@ pub fn image_to_sixel(img: DynamicImage, debug: bool) -> Vec<u8> {
 
     let width = img.width();
     let height = img.height();
-    let mut sixels = Vec::new();
 
-    sixels.extend_from_slice(format!("\x1bPq\"").as_bytes());
-    sixels.extend_from_slice(format!("1;1;{};{}", width, height).as_bytes());
-    if debug {
-        sixels.push(b'\n');
-    }
+    write!(w, "\x1bPq\"")?;
+    write!(w, "1;1;{};{}", width, height)?;
+    // if debug {
+    //     sixels.push(b'\n');
+    // }
 
     octree
         .get_palette()
         .iter()
         .enumerate()
-        .for_each(|(i, rgb)| {
+        .try_for_each(|(i, rgb)| {
             let r = rgb[0] as u16 * 100 / 255;
             let g = rgb[1] as u16 * 100 / 255;
             let b = rgb[2] as u16 * 100 / 255;
-            sixels.extend_from_slice(format!("#{};2;{};{};{}", i, r, g, b).as_bytes());
-        });
-    if debug {
-        sixels.push(b'\n');
-    }
+            write!(w, "#{};2;{};{};{}", i, r, g, b)
+        })?;
+    // if debug {
+    //     sixels.push(b'\n');
+    // }
 
     let mut sixel_buf = SixelBuf::default();
     for i in 0..height {
@@ -85,62 +85,26 @@ pub fn image_to_sixel(img: DynamicImage, debug: bool) -> Vec<u8> {
             sixel_buf.add(p_i, i);
             if let Some(sixel) = sixel_buf.take() {
                 // eprintln!("{i}, {j}");
-                sixels.extend_from_slice(sixel.as_bytes());
+                write!(w, "{sixel}")?;
             }
         }
         sixel_buf.flush();
         if let Some(sixel) = sixel_buf.take() {
             // eprintln!("flush");
-            sixels.extend_from_slice(sixel.as_bytes());
+            write!(w, "{sixel}")?;
         }
         if i < height - 1 {
             if i % 6 == 5 {
-                sixels.push(b'-');
+                write!(w, "-")?;
             } else {
-                sixels.push(b'$');
+                write!(w, "$")?;
             }
         }
-        if debug {
-            sixels.push(b'\n');
-        }
+        // if debug {
+        //     sixels.push(b'\n');
+        // }
     }
 
-    sixels.extend_from_slice(b"\x1b\\");
-    sixels
+    write!(w, "\x1b\\")?;
+    Ok(())
 }
-
-// func sixel_encode(img image.Image, w io.Writer) {
-// 	bw := bufio.NewWriter(w)
-// 	defer bw.Flush()
-
-// 	width := img.Bounds().Dx()
-// 	height := img.Bounds().Dy()
-// 	header := fmt.Sprintf("\x1bPq\"1;1;%d;%d", width, height)
-// 	bw.Write([]byte(header))
-
-// 	pixels := colors_to_pixels(img)
-// 	palette, clusterMap := sixel.Clusterize(pixels, 256, 100)
-// 	//save_palette(palette)
-
-// 	for i, p := range palette {
-// 		r := p.R * 100 / 255
-// 		g := p.G * 100 / 255
-// 		b := p.B * 100 / 255
-// 		bw.Write([]byte(fmt.Sprintf("#%d;2;%d;%d;%d", i, r, g, b)))
-// 	}
-
-// 	for i := range height {
-// 		for j := range width {
-// 			p_id := clusterMap[pixels[i*width+j]]
-// 			c := rune((1 << (i % 6)) + 63)
-// 			bw.Write([]byte(fmt.Sprintf("#%d%c", p_id, c)))
-// 		}
-// 		if i%6 == 5 {
-// 			bw.Write([]byte("-"))
-// 		} else {
-// 			bw.Write([]byte("$"))
-// 		}
-// 	}
-
-// 	bw.Write([]byte("\x1b\\"))
-// }
