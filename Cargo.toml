@@ -11,3 +11,6 @@ keywords = ["lib", "cli", "sixel"]
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
 image = "0.25.5"
+
+[profile.release]
+lto = "thin"

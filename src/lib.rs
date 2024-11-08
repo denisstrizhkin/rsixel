@@ -72,8 +72,6 @@ impl SixelEncoder {
     }
 
     pub fn image_to_sixel<W: Write>(&self, img: DynamicImage, w: &mut W) -> Result<(), Error> {
-        let start_time = SystemTime::now();
-
         let (img, octree) = self.setup(img);
         let width = img.width();
         let height = img.height();
