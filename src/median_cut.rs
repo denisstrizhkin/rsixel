@@ -1,7 +1,10 @@
 use image::Rgb;
 
-pub fn median_cut(colors: &mut [&mut Rgb<u8>], level: usize) -> Vec<Rgb<u8>> {
-    if level <= 1 {
+pub fn median_cut(colors: &mut [Rgb<u8>], level: usize) -> Vec<Rgb<u8>> {
+    eprintln!("{}: level: {}", colors.len(), level);
+    if colors.is_empty() {
+        vec![]
+    } else if level <= 1 {
         let r = (colors.iter().map(|c| c[0] as u32).sum::<u32>() / colors.len() as u32) as u8;
         let g = (colors.iter().map(|c| c[1] as u32).sum::<u32>() / colors.len() as u32) as u8;
         let b = (colors.iter().map(|c| c[2] as u32).sum::<u32>() / colors.len() as u32) as u8;
@@ -24,7 +27,7 @@ pub fn median_cut(colors: &mut [&mut Rgb<u8>], level: usize) -> Vec<Rgb<u8>> {
         } else {
             colors.sort_by(|a, b| a[2].cmp(&b[2]));
         }
-        let (left, right) = colors.split_at_mut(2);
+        let (left, right) = colors.split_at_mut(colors.len() / 2);
         let mut left = median_cut(left, level - 1);
         let mut right = median_cut(right, level - 1);
         left.append(&mut right);
