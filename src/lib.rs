@@ -1,3 +1,4 @@
+mod median_cut;
 mod octree;
 
 use self::octree::Octree;
