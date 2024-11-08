@@ -2,7 +2,7 @@ mod median_cut;
 mod octree;
 
 use self::octree::Octree;
-use image::{DynamicImage, ImageBuffer, Rgb};
+use image::{ImageReader, ImageResult, RgbImage};
 use std::io::{Error, Write};
 use std::time::SystemTime;
 
@@ -49,15 +49,21 @@ impl SixelBuf {
 }
 
 #[derive(Default)]
-pub struct SixelEncoder {}
+pub struct SixelEncoder {
+    rgb8_img: RgbImage,
+}
 
 impl SixelEncoder {
-    fn setup(&self, img: DynamicImage) -> (ImageBuffer<Rgb<u8>, Vec<u8>>, Octree) {
+    pub fn from(img_path: &str) -> ImageResult<Self> {
+        let rgb8_img = ImageReader::open(img_path)?.decode()?.to_rgb8();
+        Ok(Self { rgb8_img })
+    }
+
+    fn setup(&self) -> Octree {
         let start_time = SystemTime::now();
 
-        let img = img.to_rgb8();
         let mut octree = Octree::new(3);
-        img.pixels().for_each(|p| {
+        self.rgb8_img.pixels().for_each(|p| {
             octree.add_color(p);
         });
         octree.build_palette();
@@ -68,13 +74,13 @@ impl SixelEncoder {
             start_time.elapsed().unwrap().as_millis()
         );
 
-        (img, octree)
+        octree
     }
 
-    pub fn image_to_sixel<W: Write>(&self, img: DynamicImage, w: &mut W) -> Result<(), Error> {
-        let (img, octree) = self.setup(img);
-        let width = img.width();
-        let height = img.height();
+    pub fn image_to_sixel<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+        let octree = self.setup();
+        let width = self.rgb8_img.width();
+        let height = self.rgb8_img.height();
 
         write!(w, "\x1bPq\"")?;
         write!(w, "1;1;{};{}", width, height)?;
@@ -99,7 +105,7 @@ impl SixelEncoder {
         let mut sixel_buf = SixelBuf::default();
         for i in 0..height {
             for j in 0..width {
-                let p_i = octree.get_palette_index(img.get_pixel(j, i));
+                let p_i = octree.get_palette_index(self.rgb8_img.get_pixel(j, i));
                 sixel_buf.add(p_i, i);
                 if let Some(sixel) = sixel_buf.take() {
                     // eprintln!("{i}, {j}");
