@@ -12,5 +12,12 @@ keywords = ["lib", "cli", "sixel"]
 clap = { version = "4.5.20", features = ["derive"] }
 image = "0.25.5"
 
+[dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
+
 [profile.release]
 lto = "thin"
+
+[[bench]]
+name = "encoder_from_image"
+harness = false
