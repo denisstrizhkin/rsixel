@@ -45,25 +45,18 @@ pub fn median_cut(mut color_hist: ColorHist, palette_size: usize) -> ColorPalett
             let g_delta = g_max - g_min;
             let b_delta = b_max - b_min;
             let max_delta = r_delta.max(g_delta.max(b_delta));
-            if max_delta == r_delta {
-                slice.sort_by(|a, b| {
-                    let a = u16_to_red(a.color) as u32 * a.count;
-                    let b = u16_to_red(b.color) as u32 * b.count;
-                    a.cmp(&b)
-                });
+            let convert_fn = if max_delta == r_delta {
+                u16_to_red
             } else if max_delta == g_delta {
-                slice.sort_by(|a, b| {
-                    let a = u16_to_green(a.color) as u32 * a.count;
-                    let b = u16_to_green(b.color) as u32 * b.count;
-                    a.cmp(&b)
-                });
+                u16_to_green
             } else {
-                slice.sort_by(|a, b| {
-                    let a = u16_to_blue(a.color) as u32 * a.count;
-                    let b = u16_to_blue(b.color) as u32 * b.count;
-                    a.cmp(&b)
-                });
-            }
+                u16_to_blue
+            };
+            slice.sort_by(|a, b| {
+                let a = convert_fn(a.color) as u32 * a.count;
+                let b = convert_fn(b.color) as u32 * b.count;
+                a.cmp(&b)
+            });
             let (left, right) = slice.split_at_mut(slice.len() >> 1);
             let new_level = (level << 1) + 1;
             stack[stack_count] = (Some(left), new_level);
