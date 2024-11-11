@@ -1,7 +1,7 @@
 use image::Rgb;
 
 const MAX_HIST_COLORS: usize = 32 * 32 * 32;
-const MAX_PALETTE_COLORS: usize = 256;
+pub const MAX_PALETTE_COLORS: usize = 256;
 const RGB_MASK: u8 = 0b11111000;
 
 pub fn median_cut(colors: &mut [Rgb<u8>], level: usize) -> Vec<Rgb<u8>> {
@@ -40,28 +40,120 @@ pub fn median_cut(colors: &mut [Rgb<u8>], level: usize) -> Vec<Rgb<u8>> {
 }
 
 pub struct ColorHist {
-    map: [u16; MAX_HIST_COLORS],
+    map: [ColorHistEntry; MAX_HIST_COLORS],
     count: usize,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+struct ColorHistEntry {
+    color: u16,
+    count: u32,
 }
 
 impl ColorHist {
     pub fn from_pixels(pixels: &[Rgb<u8>]) -> Self {
-        let mut map = [0; MAX_HIST_COLORS];
+        let mut map = [ColorHistEntry::default(); MAX_HIST_COLORS];
         let mut count = 0;
         for rgb in pixels {
             let key = rgb_to_u16(*rgb) as usize;
-            if map[key] == 0 {
+            if map[key].count == 0 {
+                map[key].color = key as u16;
                 count += 1;
             }
-            map[key] += 1;
+            map[key].count += 1;
         }
-        map.sort_by(|a, b| b.cmp(a));
+        map.sort_by(|a, b| b.count.cmp(&a.count));
         Self { map, count }
     }
 
     #[inline]
     pub fn len(&self) -> usize {
         self.count
+    }
+}
+
+pub struct ColorPalette {
+    colors: [u16; MAX_PALETTE_COLORS],
+    cache: [ColorPaletteCacheEntry; MAX_HIST_COLORS],
+    count: usize,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct ColorPaletteCacheEntry {
+    is_hit: bool,
+    index: usize,
+}
+
+impl ColorPalette {
+    pub fn from_color_hist(color_hist: ColorHist, palette_size: usize) -> Self {
+        let palette_size = palette_size.min(MAX_PALETTE_COLORS);
+        let mut colors = [0; MAX_PALETTE_COLORS];
+        let mut count = 0;
+
+        if palette_size == color_hist.len() {
+            for key in 0..color_hist.len() {
+                colors[count] = color_hist.map[key].color;
+                count += 1;
+            }
+        } else {
+            for key in 0..palette_size {
+                colors[count] = color_hist.map[key].color;
+                count += 1;
+            }
+        }
+        colors[0..palette_size].sort();
+        Self {
+            colors,
+            cache: [ColorPaletteCacheEntry::default(); MAX_HIST_COLORS],
+            count,
+        }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    #[inline]
+    pub fn get_palette(&self) -> &[u16] {
+        &self.colors[0..self.len()]
+    }
+
+    pub fn get_index(&mut self, rgb: Rgb<u8>) -> usize {
+        let color = rgb_to_u16(rgb);
+        let color_usize = color as usize;
+        if self.cache[color_usize].is_hit {
+            self.cache[color_usize].index
+        } else {
+            let index = self.get_index_internal(color);
+            self.cache[color_usize].is_hit = true;
+            self.cache[color_usize].index = index;
+            index
+        }
+    }
+
+    fn get_index_internal(&self, color: u16) -> usize {
+        let mut left = 0;
+        let mut right = self.len();
+        while left < right {
+            let mid = (right + left) / 2;
+            if self.colors[mid] < color {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        if left == self.len() {
+            left - 1
+        } else if left > 0 {
+            if color - self.colors[left - 1] < self.colors[left] - color {
+                left - 1
+            } else {
+                left
+            }
+        } else {
+            left
+        }
     }
 }
 

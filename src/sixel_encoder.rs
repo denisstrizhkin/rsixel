@@ -1,4 +1,4 @@
-use super::median_cut::ColorHist;
+use super::median_cut::{u16_to_rgb, ColorHist, ColorPalette};
 use super::octree::Octree;
 use image::{ImageReader, ImageResult, Rgb, RgbImage};
 use std::io::{Error, Write};
@@ -62,26 +62,9 @@ impl SixelEncoder {
         ColorHist::from_pixels(&pixels)
     }
 
-    fn setup(&self) -> Octree {
-        let start_time = SystemTime::now();
-
-        let mut octree = Octree::new(3);
-        self.rgb8_img.pixels().for_each(|p| {
-            octree.add_color(p);
-        });
-        octree.build_palette();
-
-        eprintln!(
-            "Build color palette: {} colors, {}ms",
-            octree.get_palette().len(),
-            start_time.elapsed().unwrap().as_millis()
-        );
-
-        octree
-    }
-
-    pub fn image_to_sixel<W: Write>(&self, w: &mut W) -> Result<(), Error> {
-        let octree = self.setup();
+    pub fn image_to_sixel<W: Write>(&self, w: &mut W, palette_size: usize) -> Result<(), Error> {
+        let color_hist = self.color_hist();
+        let mut palette = ColorPalette::from_color_hist(color_hist, palette_size);
         let width = self.rgb8_img.width();
         let height = self.rgb8_img.height();
 
@@ -91,11 +74,13 @@ impl SixelEncoder {
         //     sixels.push(b'\n');
         // }
 
-        octree
+        palette
             .get_palette()
             .iter()
+            .copied()
             .enumerate()
-            .try_for_each(|(i, rgb)| {
+            .try_for_each(|(i, color)| {
+                let rgb = u16_to_rgb(color);
                 let r = rgb[0] as u16 * 100 / 255;
                 let g = rgb[1] as u16 * 100 / 255;
                 let b = rgb[2] as u16 * 100 / 255;
@@ -108,7 +93,7 @@ impl SixelEncoder {
         let mut sixel_buf = SixelBuf::default();
         for i in 0..height {
             for j in 0..width {
-                let p_i = octree.get_palette_index(self.rgb8_img.get_pixel(j, i));
+                let p_i = palette.get_index(*self.rgb8_img.get_pixel(j, i));
                 sixel_buf.add(p_i, i);
                 if let Some(sixel) = sixel_buf.take() {
                     // eprintln!("{i}, {j}");
