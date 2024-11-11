@@ -1,42 +1,81 @@
 use image::Rgb;
+use std::array;
 
 const MAX_HIST_COLORS: usize = 32 * 32 * 32;
 pub const MAX_PALETTE_COLORS: usize = 256;
 const RGB_MASK: u8 = 0b11111000;
 
-pub fn median_cut(colors: &mut [Rgb<u8>], level: usize) -> Vec<Rgb<u8>> {
-    eprintln!("{}: level: {}", colors.len(), level);
-    if colors.is_empty() {
-        vec![]
-    } else if level <= 1 {
-        let r = (colors.iter().map(|c| c[0] as u32).sum::<u32>() / colors.len() as u32) as u8;
-        let g = (colors.iter().map(|c| c[1] as u32).sum::<u32>() / colors.len() as u32) as u8;
-        let b = (colors.iter().map(|c| c[2] as u32).sum::<u32>() / colors.len() as u32) as u8;
-        vec![Rgb::from([r, g, b])]
-    } else {
-        let r_max = colors.iter().map(|c| c[0]).max().unwrap_or(u8::MAX);
-        let r_min = colors.iter().map(|c| c[0]).min().unwrap_or(u8::MIN);
-        let g_max = colors.iter().map(|c| c[1]).max().unwrap_or(u8::MAX);
-        let g_min = colors.iter().map(|c| c[1]).min().unwrap_or(u8::MIN);
-        let b_max = colors.iter().map(|c| c[2]).max().unwrap_or(u8::MAX);
-        let b_min = colors.iter().map(|c| c[2]).min().unwrap_or(u8::MIN);
-        let r_delta = r_max - r_min;
-        let g_delta = g_max - g_min;
-        let b_delta = b_max - b_min;
-        let max_delta = r_delta.max(g_delta.max(b_delta));
-        if max_delta == r_delta {
-            colors.sort_by(|a, b| a[0].cmp(&b[0]));
-        } else if max_delta == g_delta {
-            colors.sort_by(|a, b| a[1].cmp(&b[1]));
-        } else {
-            colors.sort_by(|a, b| a[2].cmp(&b[2]));
+pub fn median_cut(mut color_hist: ColorHist, palette_size: usize) -> ColorPalette {
+    let mut stack: [(Option<&mut [ColorHistEntry]>, usize); MAX_PALETTE_COLORS * 2] =
+        array::from_fn(|_| (None, 0));
+    let color_hist_len = color_hist.len();
+    stack[0] = (Some(&mut color_hist.map[0..color_hist_len]), 1);
+    let mut pos = 0;
+    let mut stack_count = 1;
+    let mut colors = [0; MAX_PALETTE_COLORS];
+    let mut colors_count = 0;
+    eprintln!("median_cut: requested palette size: {}", palette_size);
+    while pos < stack_count {
+        let slice = stack[pos].0.take().unwrap();
+        let level = stack[pos].1;
+        if (level >= palette_size || slice.len() == 1) && !slice.is_empty() {
+            let color = slice.iter().map(|c| c.color as u32 * c.count).sum::<u32>();
+            let count_sum = slice.iter().map(|c| c.count).sum::<u32>();
+            let color = color / count_sum;
+            colors[colors_count] = color as u16;
+            colors_count += 1;
+        } else if !slice.is_empty() {
+            let (r_min, r_max, g_min, g_max, b_min, b_max) = slice.iter().fold(
+                (u8::MAX, u8::MIN, u8::MAX, u8::MIN, u8::MAX, u8::MIN),
+                |(r_min, r_max, g_min, g_max, b_min, b_max), c| {
+                    let red = u16_to_red(c.color);
+                    let green = u16_to_green(c.color);
+                    let blue = u16_to_blue(c.color);
+                    (
+                        r_min.min(red),
+                        r_max.max(red),
+                        g_min.min(green),
+                        g_max.max(green),
+                        b_min.min(blue),
+                        b_max.max(blue),
+                    )
+                },
+            );
+            let r_delta = r_max - r_min;
+            let g_delta = g_max - g_min;
+            let b_delta = b_max - b_min;
+            let max_delta = r_delta.max(g_delta.max(b_delta));
+            if max_delta == r_delta {
+                slice.sort_by(|a, b| {
+                    let a = u16_to_red(a.color) as u32 * a.count;
+                    let b = u16_to_red(b.color) as u32 * b.count;
+                    a.cmp(&b)
+                });
+            } else if max_delta == g_delta {
+                slice.sort_by(|a, b| {
+                    let a = u16_to_green(a.color) as u32 * a.count;
+                    let b = u16_to_green(b.color) as u32 * b.count;
+                    a.cmp(&b)
+                });
+            } else {
+                slice.sort_by(|a, b| {
+                    let a = u16_to_blue(a.color) as u32 * a.count;
+                    let b = u16_to_blue(b.color) as u32 * b.count;
+                    a.cmp(&b)
+                });
+            }
+            let (left, right) = slice.split_at_mut(slice.len() >> 1);
+            let new_level = (level << 1) + 1;
+            stack[stack_count] = (Some(left), new_level);
+            stack_count += 1;
+            stack[stack_count] = (Some(right), new_level);
+            stack_count += 1;
         }
-        let (left, right) = colors.split_at_mut(colors.len() / 2);
-        let mut left = median_cut(left, level - 1);
-        let mut right = median_cut(right, level - 1);
-        left.append(&mut right);
-        left
+        pos += 1;
+        eprintln!("median_cut: stack_count: {stack_count}, pos {pos}");
     }
+    eprintln!("median_cut: colors_count: {}", colors_count);
+    ColorPalette::from_colors(colors, colors_count)
 }
 
 pub struct ColorHist {
@@ -87,22 +126,22 @@ pub struct ColorPaletteCacheEntry {
 impl ColorPalette {
     pub fn from_color_hist(color_hist: ColorHist, palette_size: usize) -> Self {
         let palette_size = palette_size.min(MAX_PALETTE_COLORS);
-        let mut colors = [0; MAX_PALETTE_COLORS];
-        let mut count = 0;
-
         if palette_size == color_hist.len() {
+            let mut colors = [0; MAX_PALETTE_COLORS];
+            let mut count = 0;
             for key in 0..color_hist.len() {
                 colors[count] = color_hist.map[key].color;
                 count += 1;
             }
+            Self::from_colors(colors, count)
         } else {
-            for key in 0..palette_size {
-                colors[count] = color_hist.map[key].color;
-                count += 1;
-            }
+            median_cut(color_hist, palette_size)
         }
-        colors[0..palette_size].sort();
-        Self {
+    }
+
+    pub fn from_colors(mut colors: [u16; MAX_PALETTE_COLORS], count: usize) -> Self {
+        colors[0..count].sort();
+        ColorPalette {
             colors,
             cache: [ColorPaletteCacheEntry::default(); MAX_HIST_COLORS],
             count,
@@ -165,12 +204,23 @@ pub fn rgb_to_u16(rgb: Rgb<u8>) -> u16 {
 }
 
 #[inline]
+pub fn u16_to_red(rgb: u16) -> u8 {
+    ((rgb >> 7) as u8) & RGB_MASK
+}
+
+#[inline]
+pub fn u16_to_green(rgb: u16) -> u8 {
+    ((rgb >> 2) as u8) & RGB_MASK
+}
+
+#[inline]
+pub fn u16_to_blue(rgb: u16) -> u8 {
+    (rgb << 3) as u8
+}
+
+#[inline]
 pub fn u16_to_rgb(rgb: u16) -> Rgb<u8> {
-    Rgb::from([
-        ((rgb >> 7) as u8) & RGB_MASK,
-        ((rgb >> 2) as u8) & RGB_MASK,
-        (rgb << 3) as u8,
-    ])
+    Rgb::from([u16_to_red(rgb), u16_to_green(rgb), u16_to_blue(rgb)])
 }
 
 #[cfg(test)]
