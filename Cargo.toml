@@ -21,3 +21,7 @@ lto = "thin"
 [[bench]]
 name = "encoder_from_image"
 harness = false
+
+[[bench]]
+name = "color_hist"
+harness = false
