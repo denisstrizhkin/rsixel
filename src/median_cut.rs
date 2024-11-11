@@ -168,7 +168,7 @@ impl ColorPalette {
         let mut left = 0;
         let mut right = self.len();
         while left < right {
-            let mid = (right + left) / 2;
+            let mid = (right + left) >> 1;
             if self.colors[mid] < color {
                 left = mid + 1;
             } else {
