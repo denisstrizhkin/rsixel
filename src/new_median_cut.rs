@@ -6,14 +6,6 @@ pub const MAX_PALETTE_COLORS: usize = 256;
 const RGB_MASK: u8 = 0b11111000;
 
 #[derive(Default, Clone, Copy, Debug)]
-enum SplitBy {
-    #[default]
-    Red,
-    Green,
-    Blue,
-}
-
-#[derive(Default, Clone, Copy, Debug)]
 struct VBoxBoundaries {
     r_min: u8,
     r_max: u8,
@@ -65,6 +57,14 @@ impl VBoxBoundaries {
             }
         }
     }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+enum SplitBy {
+    #[default]
+    Red,
+    Green,
+    Blue,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -308,7 +308,6 @@ impl ColorHist {
         for rgb in pixels {
             let key = rgb_to_u16(*rgb) as usize;
             if map[key] == 0 {
-                map[key] = key as u32;
                 count += 1;
             }
             map[key] += 1;
