@@ -53,7 +53,7 @@ impl VBoxBoundaries {
     }
 
     #[inline]
-    fn iterate<F>(&self, mut f: F)
+    pub fn iterate<F>(&self, mut f: F)
     where
         F: FnMut(u16, u8, u8, u8),
     {
@@ -158,31 +158,40 @@ impl VBox {
             split_at_2
         } as u8;
         let (boundaries_left, boundaries_right) = match self.split_by {
-            SplitBy::Red => {
-                let mut left = boundaries;
-                let mut right = boundaries;
-                left.r_max = split_at;
-                right.r_min = split_at;
-                (left, right)
-            }
-            SplitBy::Green => {
-                let mut left = boundaries;
-                let mut right = boundaries;
-                left.g_max = split_at;
-                right.g_min = split_at;
-                (left, right)
-            }
-            SplitBy::Blue => {
-                let mut left = boundaries;
-                let mut right = boundaries;
-                left.b_max = split_at;
-                right.b_min = split_at;
-                (left, right)
-            }
+            SplitBy::Red => (
+                VBoxBoundaries {
+                    r_max: split_at,
+                    ..boundaries
+                },
+                VBoxBoundaries {
+                    r_min: split_at + 1,
+                    ..boundaries
+                },
+            ),
+            SplitBy::Green => (
+                VBoxBoundaries {
+                    g_max: split_at,
+                    ..boundaries
+                },
+                VBoxBoundaries {
+                    g_min: split_at + 1,
+                    ..boundaries
+                },
+            ),
+            SplitBy::Blue => (
+                VBoxBoundaries {
+                    b_max: split_at,
+                    ..boundaries
+                },
+                VBoxBoundaries {
+                    b_min: split_at + 1,
+                    ..boundaries
+                },
+            ),
         };
         (
-            VBox::from(boundaries_left, &color_hist),
-            VBox::from(boundaries_right, &color_hist),
+            VBox::from(boundaries_left, color_hist),
+            VBox::from(boundaries_right, color_hist),
         )
     }
 }
@@ -250,11 +259,11 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
     let vbox = VBox::from(
         VBoxBoundaries::from(
             0,
-            RGB_COMPONENT_SIZE as u8,
+            RGB_COMPONENT_SIZE as u8 - 1,
             0,
-            RGB_COMPONENT_SIZE as u8,
+            RGB_COMPONENT_SIZE as u8 - 1,
             0,
-            RGB_COMPONENT_SIZE as u8,
+            RGB_COMPONENT_SIZE as u8 - 1,
         ),
         &palette.color_hist,
     );
