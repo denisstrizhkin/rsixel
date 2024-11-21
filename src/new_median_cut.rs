@@ -14,53 +14,89 @@ enum SplitBy {
 }
 
 #[derive(Default, Clone, Copy, Debug)]
-struct VBox {
+struct VBoxBoundaries {
     r_min: u8,
     r_max: u8,
     g_min: u8,
     g_max: u8,
     b_min: u8,
     b_max: u8,
+}
+
+impl VBoxBoundaries {
+    #[inline]
+    pub fn from(r_min: u8, r_max: u8, g_min: u8, g_max: u8, b_min: u8, b_max: u8) -> Self {
+        Self {
+            r_min,
+            r_max,
+            g_min,
+            g_max,
+            b_min,
+            b_max,
+        }
+    }
+
+    #[inline]
+    pub fn dimensions(&self) -> (u8, u8, u8) {
+        (
+            self.r_max - self.r_min + 1,
+            self.g_max - self.g_min + 1,
+            self.b_max - self.b_min + 1,
+        )
+    }
+
+    #[inline]
+    pub fn volume(&self) -> u16 {
+        ((self.r_max - self.r_min + 1) as u16)
+            * ((self.g_max - self.g_min + 1) as u16)
+            * ((self.b_max - self.b_min + 1) as u16)
+    }
+
+    #[inline]
+    fn iterate<F>(&self, mut f: F)
+    where
+        F: FnMut(u16, u8, u8, u8),
+    {
+        for r in self.r_min..=self.r_max {
+            for g in self.g_min..=self.g_max {
+                for b in self.b_min..=self.b_max {
+                    f(rgb_to_u16(Rgb::from([r << 3, g << 3, b << 3])), r, g, b);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+struct VBox {
+    boundaries: VBoxBoundaries,
     counts: [u32; RGB_COMPONENT_SIZE],
     volume: u16,
     split_by: SplitBy,
 }
 
 impl VBox {
-    pub fn from(
-        color_hist: &ColorHist,
-        r_min: u8,
-        r_max: u8,
-        g_min: u8,
-        g_max: u8,
-        b_min: u8,
-        b_max: u8,
-    ) -> Self {
-        println!("{r_min}, {r_max}, {g_min}, {g_max}, {b_min}, {b_max}");
-        let (mut r_min, mut r_max, mut g_min, mut g_max, mut b_min, mut b_max) =
-            (r_max, r_min, g_max, g_min, b_max, b_min);
-        println!("{r_min}, {r_max}, {g_min}, {g_max}, {b_min}, {b_max}");
-        for r in r_max..r_min {
-            for g in g_max..g_min {
-                for b in b_max..b_min {
-                    println!("{r}, {g}, {b}");
-                    let color = rgb_to_u16(Rgb::from([r << 3, g << 3, b << 3])) as usize;
-                    if color_hist.map[color] > 0 {
-                        r_min = r_min.min(r);
-                        r_max = r_max.max(r);
-                        g_min = g_min.min(g);
-                        g_max = g_max.max(g);
-                        b_min = b_min.min(b);
-                        b_max = b_max.max(b);
-                        println!("{r_min}, {r_max}, {g_min}, {g_max}, {b_min}, {b_max}");
-                    }
-                }
+    pub fn from(boundaries: VBoxBoundaries, color_hist: &ColorHist) -> Self {
+        let mut new_boundaries = VBoxBoundaries::from(
+            boundaries.r_max,
+            boundaries.r_min,
+            boundaries.g_max,
+            boundaries.g_min,
+            boundaries.b_max,
+            boundaries.b_min,
+        );
+        boundaries.iterate(|color, r, g, b| {
+            if color_hist.map[color as usize] > 0 {
+                new_boundaries.r_min = new_boundaries.r_min.min(r);
+                new_boundaries.r_max = new_boundaries.r_max.max(r);
+                new_boundaries.g_min = new_boundaries.g_min.min(g);
+                new_boundaries.g_max = new_boundaries.g_max.max(g);
+                new_boundaries.b_min = new_boundaries.b_min.min(b);
+                new_boundaries.b_max = new_boundaries.b_max.max(b);
             }
-        }
-        let r_delta = r_max - r_min;
-        let g_delta = g_max - g_min;
-        let b_delta = b_max - b_min;
-        let volume = (r_delta as u16) * (g_delta as u16) * (b_delta as u16);
+        });
+        let (r_delta, g_delta, b_delta) = new_boundaries.dimensions();
+        let volume = new_boundaries.volume();
         let max_delta = r_delta.max(g_delta).max(b_delta);
         let split_by = if max_delta == r_delta {
             SplitBy::Red
@@ -70,27 +106,16 @@ impl VBox {
             SplitBy::Blue
         };
         let mut counts = [0; RGB_COMPONENT_SIZE];
-        for r in r_min..=r_max {
-            for g in g_min..=g_max {
-                for b in b_min..=b_max {
-                    let color = rgb_to_u16(Rgb::from([r << 3, g << 3, b << 3])) as usize;
-                    let index = match split_by {
-                        SplitBy::Red => r,
-                        SplitBy::Green => g,
-                        SplitBy::Blue => b,
-                    };
-                    let index = (index >> 3) as usize;
-                    counts[index] += color_hist.map[color];
-                }
-            }
-        }
+        new_boundaries.iterate(|color, r, g, b| {
+            let index = match split_by {
+                SplitBy::Red => r,
+                SplitBy::Green => g,
+                SplitBy::Blue => b,
+            } as usize;
+            counts[index] += color_hist.map[color as usize];
+        });
         let a = Self {
-            r_min,
-            r_max,
-            g_min,
-            g_max,
-            b_min,
-            b_max,
+            boundaries: new_boundaries,
             counts,
             volume,
             split_by,
@@ -100,10 +125,11 @@ impl VBox {
     }
 
     pub fn split(&self, color_hist: &ColorHist) -> (VBox, VBox) {
+        let boundaries = self.boundaries;
         let (start, end) = match self.split_by {
-            SplitBy::Red => (self.r_min, self.r_max),
-            SplitBy::Green => (self.g_min, self.g_max),
-            SplitBy::Blue => (self.b_min, self.b_max),
+            SplitBy::Red => (boundaries.r_min, boundaries.r_max),
+            SplitBy::Green => (boundaries.g_min, boundaries.g_max),
+            SplitBy::Blue => (boundaries.b_min, boundaries.b_max),
         };
         let count = self.counts.iter().sum::<u32>();
         let mut split_at_1 = 0;
@@ -131,38 +157,33 @@ impl VBox {
         } else {
             split_at_2
         } as u8;
-        match self.split_by {
-            SplitBy::Red => (
-                VBox::from(
-                    color_hist, self.r_min, split_at, self.g_min, self.g_max, self.b_min,
-                    self.b_max,
-                ),
-                VBox::from(
-                    color_hist, split_at, self.r_max, self.g_min, self.g_max, self.b_min,
-                    self.b_max,
-                ),
-            ),
-            SplitBy::Green => (
-                VBox::from(
-                    color_hist, self.r_min, self.r_max, self.g_min, split_at, self.b_min,
-                    self.b_max,
-                ),
-                VBox::from(
-                    color_hist, self.r_min, self.r_max, split_at, self.g_max, self.b_min,
-                    self.b_max,
-                ),
-            ),
-            SplitBy::Blue => (
-                VBox::from(
-                    color_hist, self.r_min, self.r_max, self.g_min, self.g_max, self.b_min,
-                    split_at,
-                ),
-                VBox::from(
-                    color_hist, self.r_min, self.r_max, self.g_min, self.g_max, split_at,
-                    self.b_max,
-                ),
-            ),
-        }
+        let (boundaries_left, boundaries_right) = match self.split_by {
+            SplitBy::Red => {
+                let mut left = boundaries;
+                let mut right = boundaries;
+                left.r_max = split_at;
+                right.r_min = split_at;
+                (left, right)
+            }
+            SplitBy::Green => {
+                let mut left = boundaries;
+                let mut right = boundaries;
+                left.g_max = split_at;
+                right.g_min = split_at;
+                (left, right)
+            }
+            SplitBy::Blue => {
+                let mut left = boundaries;
+                let mut right = boundaries;
+                left.b_max = split_at;
+                right.b_min = split_at;
+                (left, right)
+            }
+        };
+        (
+            VBox::from(boundaries_left, &color_hist),
+            VBox::from(boundaries_right, &color_hist),
+        )
     }
 }
 
@@ -184,10 +205,11 @@ impl MedianCutQueue {
             return false;
         }
         let vbox = self.stack[0];
+        let (r_delta, g_delta, b_delta) = vbox.boundaries.dimensions();
         match vbox.split_by {
-            SplitBy::Red => (vbox.r_max - vbox.r_min) > 1,
-            SplitBy::Green => (vbox.g_max - vbox.g_min) > 1,
-            SplitBy::Blue => (vbox.b_max - vbox.b_min) > 1,
+            SplitBy::Red => r_delta > 1,
+            SplitBy::Green => g_delta > 1,
+            SplitBy::Blue => b_delta > 1,
         }
     }
 
@@ -226,13 +248,15 @@ impl MedianCutQueue {
 pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
     let mut queue = MedianCutQueue::new();
     let vbox = VBox::from(
+        VBoxBoundaries::from(
+            0,
+            RGB_COMPONENT_SIZE as u8,
+            0,
+            RGB_COMPONENT_SIZE as u8,
+            0,
+            RGB_COMPONENT_SIZE as u8,
+        ),
         &palette.color_hist,
-        0,
-        RGB_COMPONENT_SIZE as u8,
-        0,
-        RGB_COMPONENT_SIZE as u8,
-        0,
-        RGB_COMPONENT_SIZE as u8,
     );
     queue.put(vbox);
     eprintln!("median_cut: requested palette size: {}", palette_size);
@@ -245,28 +269,18 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
     while !queue.is_empty() {
         let vbox = queue.pop();
         let mut color_sum: u32 = 0;
-        for r in vbox.r_min..vbox.r_max {
-            for g in vbox.g_min..vbox.g_max {
-                for b in vbox.b_min..vbox.b_max {
-                    let color = rgb_to_u16(Rgb::from([r << 3, g << 3, b << 3])) as usize;
-                    if palette.color_hist.map[color] > 0 {
-                        color_sum += color as u32;
-                    }
-                }
+        vbox.boundaries.iterate(|color, _, _, _| {
+            if palette.color_hist.map[color as usize] > 0 {
+                color_sum += color as u32;
             }
-        }
+        });
         let color_count = vbox.counts.iter().sum::<u32>();
         let color = color_sum / color_count;
-        for r in vbox.r_min..vbox.r_max {
-            for g in vbox.g_min..vbox.g_max {
-                for b in vbox.b_min..vbox.b_max {
-                    let color = rgb_to_u16(Rgb::from([r << 3, g << 3, b << 3])) as usize;
-                    if palette.color_hist.map[color as usize] > 0 {
-                        palette.color_hist.map[color as usize] = palette.count as u32;
-                    }
-                }
+        vbox.boundaries.iterate(|color, _, _, _| {
+            if palette.color_hist.map[color as usize] > 0 {
+                palette.color_hist.map[color as usize] = palette.count as u32;
             }
-        }
+        });
         palette.colors[palette.count] = u16_to_rgb(color as u16);
         palette.count += 1;
     }
