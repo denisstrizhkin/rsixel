@@ -1,5 +1,4 @@
-use super::median_cut::{u16_to_rgb, ColorHist, ColorPalette};
-use super::octree::Octree;
+use super::new_median_cut::ColorPalette;
 use image::{ImageReader, ImageResult, Rgb, RgbImage};
 use std::io::{Error, Write};
 use std::time::SystemTime;
@@ -57,14 +56,9 @@ impl SixelEncoder {
         Ok(Self { rgb8_img })
     }
 
-    pub fn color_hist(&self) -> ColorHist {
-        let pixels: Vec<Rgb<u8>> = self.rgb8_img.pixels().copied().collect();
-        ColorHist::from_pixels(&pixels)
-    }
-
     pub fn image_to_sixel<W: Write>(&self, w: &mut W, palette_size: usize) -> Result<(), Error> {
-        let color_hist = self.color_hist();
-        let mut palette = ColorPalette::from_color_hist(color_hist, palette_size);
+        let pixels: Vec<Rgb<u8>> = self.rgb8_img.pixels().copied().collect();
+        let palette = ColorPalette::from_pixels(&pixels, palette_size);
         let width = self.rgb8_img.width();
         let height = self.rgb8_img.height();
 
@@ -80,10 +74,9 @@ impl SixelEncoder {
             .copied()
             .enumerate()
             .try_for_each(|(i, color)| {
-                let rgb = u16_to_rgb(color);
-                let r = rgb[0] as u16 * 100 / 255;
-                let g = rgb[1] as u16 * 100 / 255;
-                let b = rgb[2] as u16 * 100 / 255;
+                let r = color[0] as u16 * 100 / 255;
+                let g = color[1] as u16 * 100 / 255;
+                let b = color[2] as u16 * 100 / 255;
                 write!(w, "#{};2;{};{};{}", i, r, g, b)
             })?;
         // if debug {
