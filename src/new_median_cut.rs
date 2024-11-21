@@ -120,7 +120,6 @@ impl VBox {
             volume,
             split_by,
         };
-        println!("{a:?}");
         a
     }
 
@@ -131,32 +130,19 @@ impl VBox {
             SplitBy::Green => (boundaries.g_min, boundaries.g_max),
             SplitBy::Blue => (boundaries.b_min, boundaries.b_max),
         };
-        let count = self.counts.iter().sum::<u32>();
-        let mut split_at_1 = 0;
-        let mut split_count_1 = 0;
-        for i in start..end {
-            split_at_1 = i as usize + 1;
-            split_count_1 += self.counts[i as usize];
-            if split_count_1 >= count / 2 {
-                break;
+        let total_count = self.counts.iter().sum::<u32>();
+        let target_count = total_count / 2;
+        let mut cumulative_count = 0;
+        let mut split_at = 0;
+        let mut min_diff = u32::MAX;
+        for i in start..=end {
+            cumulative_count += self.counts[i as usize];
+            let diff = cumulative_count.abs_diff(target_count);
+            if diff < min_diff {
+                min_diff = diff;
+                split_at = i;
             }
         }
-        let split_delta_1 = split_count_1.abs_diff(count - split_count_1);
-        let mut split_at_2 = 0;
-        let mut split_count_2 = 0;
-        for i in (start..end).rev() {
-            split_at_2 = i as usize;
-            split_count_2 += self.counts[i as usize];
-            if split_count_2 >= count / 2 {
-                break;
-            }
-        }
-        let split_delta_2 = split_count_2.abs_diff(count - split_count_2);
-        let split_at = if split_delta_1 < split_delta_2 {
-            split_at_1
-        } else {
-            split_at_2
-        } as u8;
         let (boundaries_left, boundaries_right) = match self.split_by {
             SplitBy::Red => (
                 VBoxBoundaries {
@@ -189,6 +175,11 @@ impl VBox {
                 },
             ),
         };
+        println!("\nsplit by {:?}, volume {}", self.split_by, self.volume,);
+        println!("{boundaries:?}");
+        println!("into");
+        println!("{boundaries_left:?}");
+        println!("{boundaries_right:?}");
         (
             VBox::from(boundaries_left, color_hist),
             VBox::from(boundaries_right, color_hist),
@@ -209,23 +200,15 @@ impl MedianCutQueue {
         }
     }
 
+    #[inline]
     pub fn has_splittable(&self) -> bool {
-        if self.is_empty() {
-            return false;
-        }
-        let vbox = self.stack[0];
-        let (r_delta, g_delta, b_delta) = vbox.boundaries.dimensions();
-        match vbox.split_by {
-            SplitBy::Red => r_delta > 1,
-            SplitBy::Green => g_delta > 1,
-            SplitBy::Blue => b_delta > 1,
-        }
+        !self.is_empty() && self.stack[self.count - 1].volume > 1
     }
 
     pub fn put(&mut self, vbox: VBox) {
         let mut pos = 0;
         for _ in 0..self.count {
-            if vbox.volume < self.stack[pos].volume {
+            if vbox.volume > self.stack[pos].volume {
                 pos += 1;
             } else {
                 break;
@@ -280,16 +263,12 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
         let mut color_sum: u32 = 0;
         vbox.boundaries.iterate(|color, _, _, _| {
             if palette.color_hist.map[color as usize] > 0 {
-                color_sum += color as u32;
+                color_sum += color as u32 * palette.color_hist.map[color as usize];
+                palette.color_hist.map[color as usize] = palette.count as u32;
             }
         });
         let color_count = vbox.counts.iter().sum::<u32>();
         let color = color_sum / color_count;
-        vbox.boundaries.iterate(|color, _, _, _| {
-            if palette.color_hist.map[color as usize] > 0 {
-                palette.color_hist.map[color as usize] = palette.count as u32;
-            }
-        });
         palette.colors[palette.count] = u16_to_rgb(color as u16);
         palette.count += 1;
     }
@@ -330,7 +309,7 @@ impl ColorPalette {
             color_hist: ColorHist::from_pixels(pixels),
             count: 0,
         };
-        if palette_size >= palette.color_hist.count {
+        if false {
             for color in 0..palette.color_hist.map.len() {
                 if palette.color_hist.map[color] > 0 {
                     palette.colors[palette.count] = u16_to_rgb(color as u16);
