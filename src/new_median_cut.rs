@@ -114,13 +114,12 @@ impl VBox {
             } as usize;
             counts[index] += color_hist.map[color as usize];
         });
-        let a = Self {
+        Self {
             boundaries: new_boundaries,
             counts,
             volume,
             split_by,
-        };
-        a
+        }
     }
 
     pub fn split(&self, color_hist: &ColorHist) -> (VBox, VBox) {
@@ -175,11 +174,6 @@ impl VBox {
                 },
             ),
         };
-        println!("\nsplit by {:?}, volume {}", self.split_by, self.volume,);
-        println!("{boundaries:?}");
-        println!("into");
-        println!("{boundaries_left:?}");
-        println!("{boundaries_right:?}");
         (
             VBox::from(boundaries_left, color_hist),
             VBox::from(boundaries_right, color_hist),
@@ -251,7 +245,6 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
         &palette.color_hist,
     );
     queue.put(vbox);
-    eprintln!("median_cut: requested palette size: {}", palette_size);
     while queue.has_splittable() && queue.len() < palette_size {
         let vbox = queue.pop();
         let (left, right) = vbox.split(&palette.color_hist);
@@ -262,17 +255,29 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
         let vbox = queue.pop();
         let mut color_sum: u32 = 0;
         vbox.boundaries.iterate(|color, _, _, _| {
+            color_sum += color as u32 * palette.color_hist.map[color as usize];
+        });
+        let color_count = vbox.counts.iter().sum::<u32>();
+        let color_avg = (color_sum / color_count) as u16;
+        let mut final_color = 0;
+        let mut min_diff = u16::MAX;
+        vbox.boundaries.iterate(|color, _, _, _| {
             if palette.color_hist.map[color as usize] > 0 {
-                color_sum += color as u32 * palette.color_hist.map[color as usize];
+                let diff = color_avg.abs_diff(color);
+                if diff < min_diff {
+                    min_diff = diff;
+                    final_color = color;
+                }
+            }
+        });
+        vbox.boundaries.iterate(|color, _, _, _| {
+            if palette.color_hist.map[color as usize] > 0 {
                 palette.color_hist.map[color as usize] = palette.count as u32;
             }
         });
-        let color_count = vbox.counts.iter().sum::<u32>();
-        let color = color_sum / color_count;
-        palette.colors[palette.count] = u16_to_rgb(color as u16);
+        palette.colors[palette.count] = u16_to_rgb(final_color);
         palette.count += 1;
     }
-    eprintln!("median_cut: colors_count: {}", palette.count);
 }
 
 pub struct ColorHist {
