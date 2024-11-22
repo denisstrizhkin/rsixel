@@ -1,5 +1,4 @@
 pub mod median_cut;
-pub mod new_median_cut;
 mod octree;
 pub mod sixel_encoder;
 

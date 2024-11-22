@@ -1,144 +1,331 @@
 use image::Rgb;
-use std::array;
 
-const MAX_HIST_COLORS: usize = 32 * 32 * 32;
+const RGB_COMPONENT_SIZE: usize = 32;
+const MAX_HIST_COLORS: usize = RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE;
 pub const MAX_PALETTE_COLORS: usize = 256;
 const RGB_MASK: u8 = 0b11111000;
 
-pub fn median_cut(mut color_hist: ColorHist, palette_size: usize) -> ColorPalette {
-    let mut stack: [(Option<&mut [ColorHistEntry]>, usize); MAX_PALETTE_COLORS * 2] =
-        array::from_fn(|_| (None, 0));
-    let color_hist_len = color_hist.len();
-    stack[0] = (Some(&mut color_hist.map[0..color_hist_len]), 1);
-    let mut pos = 0;
-    let mut stack_count = 1;
-    let mut colors = [0; MAX_PALETTE_COLORS];
-    let mut colors_count = 0;
-    eprintln!("median_cut: requested palette size: {}", palette_size);
-    while pos < stack_count {
-        let slice = stack[pos].0.take().unwrap();
-        let level = stack[pos].1;
-        if (level >= palette_size || slice.len() == 1) && !slice.is_empty() {
-            let color = slice.iter().map(|c| c.color as u32 * c.count).sum::<u32>();
-            let count_sum = slice.iter().map(|c| c.count).sum::<u32>();
-            let color = color / count_sum;
-            colors[colors_count] = color as u16;
-            colors_count += 1;
-        } else if !slice.is_empty() {
-            let (r_min, r_max, g_min, g_max, b_min, b_max) = slice.iter().fold(
-                (u8::MAX, u8::MIN, u8::MAX, u8::MIN, u8::MAX, u8::MIN),
-                |(r_min, r_max, g_min, g_max, b_min, b_max), c| {
-                    let red = u16_to_red(c.color);
-                    let green = u16_to_green(c.color);
-                    let blue = u16_to_blue(c.color);
-                    (
-                        r_min.min(red),
-                        r_max.max(red),
-                        g_min.min(green),
-                        g_max.max(green),
-                        b_min.min(blue),
-                        b_max.max(blue),
-                    )
-                },
-            );
-            let r_delta = r_max - r_min;
-            let g_delta = g_max - g_min;
-            let b_delta = b_max - b_min;
-            let max_delta = r_delta.max(g_delta.max(b_delta));
-            let convert_fn = if max_delta == r_delta {
-                u16_to_red
-            } else if max_delta == g_delta {
-                u16_to_green
-            } else {
-                u16_to_blue
-            };
-            slice.sort_by(|a, b| {
-                let a = convert_fn(a.color) as u32 * a.count;
-                let b = convert_fn(b.color) as u32 * b.count;
-                a.cmp(&b)
-            });
-            let (left, right) = slice.split_at_mut(slice.len() >> 1);
-            let new_level = (level << 1) + 1;
-            stack[stack_count] = (Some(left), new_level);
-            stack_count += 1;
-            stack[stack_count] = (Some(right), new_level);
-            stack_count += 1;
-        }
-        pos += 1;
-        eprintln!("median_cut: stack_count: {stack_count}, pos {pos}");
-    }
-    eprintln!("median_cut: colors_count: {}", colors_count);
-    ColorPalette::from_colors(colors, colors_count)
+#[derive(Default, Clone, Copy, Debug)]
+struct VBoxBoundaries {
+    r_min: u8,
+    r_max: u8,
+    g_min: u8,
+    g_max: u8,
+    b_min: u8,
+    b_max: u8,
 }
 
-pub struct ColorHist {
-    map: [ColorHistEntry; MAX_HIST_COLORS],
+impl VBoxBoundaries {
+    #[inline]
+    pub fn from(r_min: u8, r_max: u8, g_min: u8, g_max: u8, b_min: u8, b_max: u8) -> Self {
+        Self {
+            r_min,
+            r_max,
+            g_min,
+            g_max,
+            b_min,
+            b_max,
+        }
+    }
+
+    #[inline]
+    pub fn dimensions(&self) -> (u8, u8, u8) {
+        (
+            self.r_max - self.r_min + 1,
+            self.g_max - self.g_min + 1,
+            self.b_max - self.b_min + 1,
+        )
+    }
+
+    #[inline]
+    pub fn volume(&self) -> u16 {
+        ((self.r_max - self.r_min + 1) as u16)
+            * ((self.g_max - self.g_min + 1) as u16)
+            * ((self.b_max - self.b_min + 1) as u16)
+    }
+
+    #[inline]
+    pub fn iterate<F>(&self, mut f: F)
+    where
+        F: FnMut(u16, u8, u8, u8),
+    {
+        for r in self.r_min..=self.r_max {
+            for g in self.g_min..=self.g_max {
+                for b in self.b_min..=self.b_max {
+                    f(rgb_to_u16(Rgb::from([r << 3, g << 3, b << 3])), r, g, b);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+enum SplitBy {
+    #[default]
+    Red,
+    Green,
+    Blue,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+struct VBox {
+    boundaries: VBoxBoundaries,
+    counts: [u32; RGB_COMPONENT_SIZE],
+    volume: u16,
+    split_by: SplitBy,
+}
+
+impl VBox {
+    pub fn from(boundaries: VBoxBoundaries, color_hist: &ColorHist) -> Self {
+        let mut new_boundaries = VBoxBoundaries::from(
+            boundaries.r_max,
+            boundaries.r_min,
+            boundaries.g_max,
+            boundaries.g_min,
+            boundaries.b_max,
+            boundaries.b_min,
+        );
+        boundaries.iterate(|color, r, g, b| {
+            if color_hist.map[color as usize] > 0 {
+                new_boundaries.r_min = new_boundaries.r_min.min(r);
+                new_boundaries.r_max = new_boundaries.r_max.max(r);
+                new_boundaries.g_min = new_boundaries.g_min.min(g);
+                new_boundaries.g_max = new_boundaries.g_max.max(g);
+                new_boundaries.b_min = new_boundaries.b_min.min(b);
+                new_boundaries.b_max = new_boundaries.b_max.max(b);
+            }
+        });
+        let (r_delta, g_delta, b_delta) = new_boundaries.dimensions();
+        let volume = new_boundaries.volume();
+        let max_delta = r_delta.max(g_delta).max(b_delta);
+        let split_by = if max_delta == r_delta {
+            SplitBy::Red
+        } else if max_delta == g_delta {
+            SplitBy::Green
+        } else {
+            SplitBy::Blue
+        };
+        let mut counts = [0; RGB_COMPONENT_SIZE];
+        new_boundaries.iterate(|color, r, g, b| {
+            let index = match split_by {
+                SplitBy::Red => r,
+                SplitBy::Green => g,
+                SplitBy::Blue => b,
+            } as usize;
+            counts[index] += color_hist.map[color as usize];
+        });
+        Self {
+            boundaries: new_boundaries,
+            counts,
+            volume,
+            split_by,
+        }
+    }
+
+    pub fn split(&self, color_hist: &ColorHist) -> (VBox, VBox) {
+        let boundaries = self.boundaries;
+        let (start, end) = match self.split_by {
+            SplitBy::Red => (boundaries.r_min, boundaries.r_max),
+            SplitBy::Green => (boundaries.g_min, boundaries.g_max),
+            SplitBy::Blue => (boundaries.b_min, boundaries.b_max),
+        };
+        let total_count = self.counts.iter().sum::<u32>();
+        let target_count = total_count / 2;
+        let mut cumulative_count = 0;
+        let mut split_at = 0;
+        let mut min_diff = u32::MAX;
+        for i in start..=end {
+            cumulative_count += self.counts[i as usize];
+            let diff = cumulative_count.abs_diff(target_count);
+            if diff < min_diff {
+                min_diff = diff;
+                split_at = i;
+            }
+        }
+        let (boundaries_left, boundaries_right) = match self.split_by {
+            SplitBy::Red => (
+                VBoxBoundaries {
+                    r_max: split_at,
+                    ..boundaries
+                },
+                VBoxBoundaries {
+                    r_min: split_at + 1,
+                    ..boundaries
+                },
+            ),
+            SplitBy::Green => (
+                VBoxBoundaries {
+                    g_max: split_at,
+                    ..boundaries
+                },
+                VBoxBoundaries {
+                    g_min: split_at + 1,
+                    ..boundaries
+                },
+            ),
+            SplitBy::Blue => (
+                VBoxBoundaries {
+                    b_max: split_at,
+                    ..boundaries
+                },
+                VBoxBoundaries {
+                    b_min: split_at + 1,
+                    ..boundaries
+                },
+            ),
+        };
+        (
+            VBox::from(boundaries_left, color_hist),
+            VBox::from(boundaries_right, color_hist),
+        )
+    }
+}
+
+struct MedianCutQueue {
+    stack: [VBox; MAX_PALETTE_COLORS],
     count: usize,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
-struct ColorHistEntry {
-    color: u16,
-    count: u32,
+impl MedianCutQueue {
+    pub fn new() -> Self {
+        Self {
+            stack: [VBox::default(); MAX_PALETTE_COLORS],
+            count: 0,
+        }
+    }
+
+    #[inline]
+    pub fn has_splittable(&self) -> bool {
+        !self.is_empty() && self.stack[self.count - 1].volume > 1
+    }
+
+    pub fn put(&mut self, vbox: VBox) {
+        let mut pos = 0;
+        for _ in 0..self.count {
+            if vbox.volume > self.stack[pos].volume {
+                pos += 1;
+            } else {
+                break;
+            }
+        }
+        for i in (pos + 1..=self.count).rev() {
+            self.stack[i] = self.stack[i - 1];
+        }
+        self.stack[pos] = vbox;
+        self.count += 1;
+    }
+
+    pub fn pop(&mut self) -> VBox {
+        self.count -= 1;
+        self.stack[self.count]
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
+    let mut queue = MedianCutQueue::new();
+    let vbox = VBox::from(
+        VBoxBoundaries::from(
+            0,
+            RGB_COMPONENT_SIZE as u8 - 1,
+            0,
+            RGB_COMPONENT_SIZE as u8 - 1,
+            0,
+            RGB_COMPONENT_SIZE as u8 - 1,
+        ),
+        &palette.color_hist,
+    );
+    queue.put(vbox);
+    while queue.has_splittable() && queue.len() < palette_size {
+        let vbox = queue.pop();
+        let (left, right) = vbox.split(&palette.color_hist);
+        queue.put(left);
+        queue.put(right);
+    }
+    while !queue.is_empty() {
+        let vbox = queue.pop();
+        let mut color_sum: u32 = 0;
+        vbox.boundaries.iterate(|color, _, _, _| {
+            color_sum += color as u32 * palette.color_hist.map[color as usize];
+        });
+        let color_count = vbox.counts.iter().sum::<u32>();
+        let color_avg = (color_sum / color_count) as u16;
+        let mut final_color = 0;
+        let mut min_diff = u16::MAX;
+        vbox.boundaries.iterate(|color, _, _, _| {
+            if palette.color_hist.map[color as usize] > 0 {
+                let diff = color_avg.abs_diff(color);
+                if diff < min_diff {
+                    min_diff = diff;
+                    final_color = color;
+                }
+            }
+        });
+        vbox.boundaries.iterate(|color, _, _, _| {
+            if palette.color_hist.map[color as usize] > 0 {
+                palette.color_hist.map[color as usize] = palette.count as u32;
+            }
+        });
+        palette.colors[palette.count] = u16_to_rgb(final_color);
+        palette.count += 1;
+    }
+}
+
+pub struct ColorHist {
+    map: [u32; MAX_HIST_COLORS],
+    count: usize,
 }
 
 impl ColorHist {
     pub fn from_pixels(pixels: &[Rgb<u8>]) -> Self {
-        let mut map = [ColorHistEntry::default(); MAX_HIST_COLORS];
+        let mut map = [0; MAX_HIST_COLORS];
         let mut count = 0;
         for rgb in pixels {
             let key = rgb_to_u16(*rgb) as usize;
-            if map[key].count == 0 {
-                map[key].color = key as u16;
+            if map[key] == 0 {
                 count += 1;
             }
-            map[key].count += 1;
+            map[key] += 1;
         }
-        map.sort_by(|a, b| b.count.cmp(&a.count));
         Self { map, count }
-    }
-
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.count
     }
 }
 
 pub struct ColorPalette {
-    colors: [u16; MAX_PALETTE_COLORS],
-    cache: [ColorPaletteCacheEntry; MAX_HIST_COLORS],
+    colors: [Rgb<u8>; MAX_PALETTE_COLORS],
+    color_hist: ColorHist,
     count: usize,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
-pub struct ColorPaletteCacheEntry {
-    is_hit: bool,
-    index: usize,
-}
-
 impl ColorPalette {
-    pub fn from_color_hist(color_hist: ColorHist, palette_size: usize) -> Self {
+    pub fn from_pixels(pixels: &[Rgb<u8>], palette_size: usize) -> Self {
         let palette_size = palette_size.min(MAX_PALETTE_COLORS);
-        if palette_size == color_hist.len() {
-            let mut colors = [0; MAX_PALETTE_COLORS];
-            let mut count = 0;
-            for key in 0..color_hist.len() {
-                colors[count] = color_hist.map[key].color;
-                count += 1;
+        let mut palette = Self {
+            colors: [Rgb::from([0, 0, 0]); MAX_PALETTE_COLORS],
+            color_hist: ColorHist::from_pixels(pixels),
+            count: 0,
+        };
+        if palette.color_hist.count <= palette_size {
+            for color in 0..palette.color_hist.map.len() {
+                if palette.color_hist.map[color] > 0 {
+                    palette.colors[palette.count] = u16_to_rgb(color as u16);
+                    palette.color_hist.map[color] = palette.count as u32;
+                    palette.count += 1;
+                }
             }
-            Self::from_colors(colors, count)
         } else {
-            median_cut(color_hist, palette_size)
+            median_cut(&mut palette, palette_size);
         }
-    }
-
-    pub fn from_colors(mut colors: [u16; MAX_PALETTE_COLORS], count: usize) -> Self {
-        colors[0..count].sort();
-        ColorPalette {
-            colors,
-            cache: [ColorPaletteCacheEntry::default(); MAX_HIST_COLORS],
-            count,
-        }
+        palette
     }
 
     #[inline]
@@ -147,45 +334,13 @@ impl ColorPalette {
     }
 
     #[inline]
-    pub fn get_palette(&self) -> &[u16] {
+    pub fn get_palette(&self) -> &[Rgb<u8>] {
         &self.colors[0..self.len()]
     }
 
-    pub fn get_index(&mut self, rgb: Rgb<u8>) -> usize {
-        let color = rgb_to_u16(rgb);
-        let color_usize = color as usize;
-        if self.cache[color_usize].is_hit {
-            self.cache[color_usize].index
-        } else {
-            let index = self.get_index_internal(color);
-            self.cache[color_usize].is_hit = true;
-            self.cache[color_usize].index = index;
-            index
-        }
-    }
-
-    fn get_index_internal(&self, color: u16) -> usize {
-        let mut left = 0;
-        let mut right = self.len();
-        while left < right {
-            let mid = (right + left) >> 1;
-            if self.colors[mid] < color {
-                left = mid + 1;
-            } else {
-                right = mid;
-            }
-        }
-        if left == self.len() {
-            left - 1
-        } else if left > 0 {
-            if color - self.colors[left - 1] < self.colors[left] - color {
-                left - 1
-            } else {
-                left
-            }
-        } else {
-            left
-        }
+    #[inline]
+    pub fn get_index(&self, rgb: Rgb<u8>) -> usize {
+        self.color_hist.map[rgb_to_u16(rgb) as usize] as usize
     }
 }
 

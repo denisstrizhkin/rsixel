@@ -1,4 +1,4 @@
-use super::new_median_cut::ColorPalette;
+use super::median_cut::ColorPalette;
 use image::{ImageReader, ImageResult, Rgb, RgbImage};
 use std::io::{Error, Write};
 use std::time::SystemTime;
