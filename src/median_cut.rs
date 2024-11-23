@@ -1,7 +1,7 @@
-use image::Rgb;
+use image::{Rgb, RgbImage};
 
 const RGB_COMPONENT_SIZE: usize = 32;
-const MAX_HIST_COLORS: usize = RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE;
+pub const MAX_HIST_COLORS: usize = RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE;
 pub const MAX_PALETTE_COLORS: usize = 256;
 const RGB_MASK: u8 = 0b11111000;
 
@@ -231,7 +231,7 @@ impl MedianCutQueue {
     }
 }
 
-pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
+pub fn median_cut(palette: &mut ColorQuantizer, color_hist: ColorHist, palette_size: usize) {
     let mut queue = MedianCutQueue::new();
     let vbox = VBox::from(
         VBoxBoundaries::from(
@@ -242,12 +242,12 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
             0,
             RGB_COMPONENT_SIZE as u8 - 1,
         ),
-        &palette.color_hist,
+        &color_hist,
     );
     queue.put(vbox);
     while queue.has_splittable() && queue.len() < palette_size {
         let vbox = queue.pop();
-        let (left, right) = vbox.split(&palette.color_hist);
+        let (left, right) = vbox.split(&color_hist);
         queue.put(left);
         queue.put(right);
     }
@@ -255,27 +255,22 @@ pub fn median_cut(palette: &mut ColorPalette, palette_size: usize) {
         let vbox = queue.pop();
         let mut color_sum: u32 = 0;
         vbox.boundaries.iterate(|color, _, _, _| {
-            color_sum += color as u32 * palette.color_hist.map[color as usize];
+            color_sum += color as u32 * color_hist.map[color as usize];
         });
         let color_count = vbox.counts.iter().sum::<u32>();
         let color_avg = (color_sum / color_count) as u16;
         let mut final_color = 0;
-        let mut min_diff = u16::MAX;
+        let mut min_diff = u32::MAX;
         vbox.boundaries.iterate(|color, _, _, _| {
-            if palette.color_hist.map[color as usize] > 0 {
-                let diff = color_avg.abs_diff(color);
+            if color_hist.map[color as usize] > 0 {
+                let diff = u16_quadratic_diff(color_avg, color);
                 if diff < min_diff {
                     min_diff = diff;
                     final_color = color;
                 }
             }
         });
-        vbox.boundaries.iterate(|color, _, _, _| {
-            if palette.color_hist.map[color as usize] > 0 {
-                palette.color_hist.map[color as usize] = palette.count as u32;
-            }
-        });
-        palette.colors[palette.count] = u16_to_rgb(final_color);
+        palette.colors[palette.count] = final_color;
         palette.count += 1;
     }
 }
@@ -286,10 +281,10 @@ pub struct ColorHist {
 }
 
 impl ColorHist {
-    pub fn from_pixels(pixels: &[Rgb<u8>]) -> Self {
+    pub fn from(img: &RgbImage) -> Self {
         let mut map = [0; MAX_HIST_COLORS];
         let mut count = 0;
-        for rgb in pixels {
+        for rgb in img.pixels() {
             let key = rgb_to_u16(*rgb) as usize;
             if map[key] == 0 {
                 count += 1;
@@ -300,30 +295,34 @@ impl ColorHist {
     }
 }
 
-pub struct ColorPalette {
-    colors: [Rgb<u8>; MAX_PALETTE_COLORS],
-    color_hist: ColorHist,
+pub struct ColorQuantizer {
+    colors: [u16; MAX_PALETTE_COLORS],
+    colors_rgb: [Rgb<u8>; MAX_PALETTE_COLORS],
     count: usize,
 }
 
-impl ColorPalette {
-    pub fn from_pixels(pixels: &[Rgb<u8>], palette_size: usize) -> Self {
+impl ColorQuantizer {
+    pub fn from(img: &RgbImage, palette_size: usize) -> Self {
         let palette_size = palette_size.min(MAX_PALETTE_COLORS);
+        let color_hist = ColorHist::from(img);
         let mut palette = Self {
-            colors: [Rgb::from([0, 0, 0]); MAX_PALETTE_COLORS],
-            color_hist: ColorHist::from_pixels(pixels),
+            colors: [0; MAX_PALETTE_COLORS],
+            colors_rgb: [Rgb::from([0, 0, 0]); MAX_PALETTE_COLORS],
             count: 0,
         };
-        if palette.color_hist.count <= palette_size {
-            for color in 0..palette.color_hist.map.len() {
-                if palette.color_hist.map[color] > 0 {
-                    palette.colors[palette.count] = u16_to_rgb(color as u16);
-                    palette.color_hist.map[color] = palette.count as u32;
+        if color_hist.count <= palette_size {
+            for color in 0..color_hist.map.len() {
+                if color_hist.map[color] > 0 {
+                    palette.colors[palette.count] = color as u16;
                     palette.count += 1;
                 }
             }
         } else {
-            median_cut(&mut palette, palette_size);
+            median_cut(&mut palette, color_hist, palette_size);
+        }
+        palette.colors.sort();
+        for i in 0..palette.count {
+            palette.colors_rgb[i] = u16_to_rgb(palette.colors[i]);
         }
         palette
     }
@@ -335,13 +334,44 @@ impl ColorPalette {
 
     #[inline]
     pub fn get_palette(&self) -> &[Rgb<u8>] {
-        &self.colors[0..self.len()]
+        &self.colors_rgb[0..self.len()]
     }
 
-    #[inline]
     pub fn get_index(&self, rgb: Rgb<u8>) -> usize {
-        self.color_hist.map[rgb_to_u16(rgb) as usize] as usize
+        let color = rgb_to_u16(rgb);
+        let mut index = 0;
+        let mut min_diff = u32::MAX;
+        let mut left = 0;
+        let mut right = self.len();
+        while left < right {
+            let mid = (left + right) / 2;
+            let mid_color = self.colors[mid];
+            let diff = u16_quadratic_diff(mid_color, color);
+            if diff < min_diff {
+                index = mid;
+                min_diff = diff;
+            }
+            if mid_color < color {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        index
     }
+}
+
+pub fn u16_quadratic_diff(a: u16, b: u16) -> u32 {
+    let a_r = u16_to_red(a) as i32;
+    let a_g = u16_to_green(a) as i32;
+    let a_b = u16_to_blue(a) as i32;
+    let b_r = u16_to_red(b) as i32;
+    let b_g = u16_to_green(b) as i32;
+    let b_b = u16_to_blue(b) as i32;
+    let d_r = a_r - b_r;
+    let d_g = a_g - b_g;
+    let d_b = a_b - b_b;
+    (d_r * d_r + d_g * d_g + d_b * d_b) as u32
 }
 
 #[inline]
