@@ -320,7 +320,8 @@ impl ColorQuantizer {
         } else {
             median_cut(&mut palette, color_hist, palette_size);
         }
-        palette.colors.sort();
+        let len = palette.len();
+        palette.colors[0..len].sort();
         for i in 0..palette.count {
             palette.colors_rgb[i] = u16_to_rgb(palette.colors[i]);
         }
