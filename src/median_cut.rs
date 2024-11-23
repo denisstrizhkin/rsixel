@@ -1,4 +1,4 @@
-use image::{Rgb, RgbImage};
+use image::{imageops::ColorMap, Rgb, RgbImage};
 
 const RGB_COMPONENT_SIZE: usize = 32;
 pub const MAX_HIST_COLORS: usize = RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE * RGB_COMPONENT_SIZE;
@@ -359,6 +359,20 @@ impl ColorQuantizer {
             }
         }
         index
+    }
+}
+
+impl ColorMap for ColorQuantizer {
+    type Color = Rgb<u8>;
+
+    #[inline]
+    fn index_of(&self, color: &Self::Color) -> usize {
+        self.get_index(*color)
+    }
+
+    #[inline]
+    fn map_color(&self, color: &mut Self::Color) {
+        *color = self.get_palette()[self.get_index(*color)]
     }
 }
 

@@ -21,7 +21,7 @@ struct Args {
 
 fn run(img_path: &str, palette_size: usize, is_dither: bool) -> Result<(), Box<dyn Error>> {
     let mut stdout = stdout().lock();
-    let sixel_encoder = SixelEncoder::from(img_path)?;
+    let mut sixel_encoder = SixelEncoder::from(img_path)?;
     sixel_encoder.image_to_sixel(&mut stdout, palette_size, is_dither)?;
     Ok(())
 }
