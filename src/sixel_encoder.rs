@@ -1,8 +1,8 @@
-use crate::median_cut::{rgb_to_u16, u16_to_rgb, ColorQuantizer, MAX_HIST_COLORS};
+// use crate::median_cut::{rgb_to_u16, u16_to_rgb, ColorQuantizer, MAX_HIST_COLORS};
+use crate::octree::ColorQuantizer;
 use image::imageops::dither;
-use image::{ImageReader, ImageResult, Rgb, RgbImage};
+use image::{ImageReader, ImageResult, RgbImage};
 use std::io::{Error, Write};
-use std::time::SystemTime;
 
 #[derive(Default, Debug)]
 struct SixelBuf {
@@ -68,7 +68,7 @@ impl SixelEncoder {
         let height = self.rgb8_img.height() as usize;
 
         write!(w, "\x1bPq\"")?;
-        write!(w, "1;1;{};{}", width, height)?;
+        write!(w, "1;1;{width};{height}")?;
         // if debug {
         //     sixels.push(b'\n');
         // }
@@ -82,7 +82,7 @@ impl SixelEncoder {
                 let r = color[0] as u16 * 100 / 255;
                 let g = color[1] as u16 * 100 / 255;
                 let b = color[2] as u16 * 100 / 255;
-                write!(w, "#{};2;{};{};{}", i, r, g, b)
+                write!(w, "#{i};2;{r};{g};{b}")
             })?;
         // if debug {
         //     sixels.push(b'\n');
@@ -95,7 +95,7 @@ impl SixelEncoder {
         let mut sixel_buf = SixelBuf::default();
         for y in 0..height {
             for x in 0..width {
-                let p_i = palette.get_index(*self.rgb8_img.get_pixel(x as u32, y as u32));
+                let p_i = palette.get_index(self.rgb8_img.get_pixel(x as u32, y as u32));
                 sixel_buf.add(p_i, y);
                 if let Some(sixel) = sixel_buf.take() {
                     // eprintln!("{i}, {j}");
@@ -123,55 +123,3 @@ impl SixelEncoder {
         Ok(())
     }
 }
-
-// pub fn dither(img: &RgbImage, palette: &ColorQuantizer) -> Vec<Rgb<u8>> {
-//     let height = img.height() as usize;
-//     let width = img.width() as usize;
-//     let u16_color_to_f32 = |color: u16| color as f32 / (MAX_HIST_COLORS - 1) as f32;
-//     let mut pixels: Vec<f32> = img
-//         .pixels()
-//         .map(|rgb| u16_color_to_f32(rgb_to_u16(*rgb)))
-//         .collect();
-//     let get_index = |x: usize, y: usize| y * width + x;
-//     let f32_color_to_u16 = |color: f32| {
-//         let color = (color * (MAX_HIST_COLORS - 1) as f32) as i32;
-//         if color < 0 {
-//             0u16
-//         } else if color > MAX_HIST_COLORS as i32 - 1 {
-//             MAX_HIST_COLORS as u16 - 1
-//         } else {
-//             color as u16
-//         }
-//     };
-//     let match_color = |color: f32| {
-//         let color = f32_color_to_u16(color);
-//         let color = palette.get_palette()[palette.get_index(u16_to_rgb(color))];
-//         u16_color_to_f32(rgb_to_u16(color))
-//     };
-//     for y in 0..height {
-//         for x in 0..width {
-//             let old_pixel = &mut pixels[get_index(x, y)];
-//             let new_pixel = match_color(*old_pixel);
-//             let error = *old_pixel - new_pixel;
-//             *old_pixel = new_pixel;
-//             if x < width - 1 {
-//                 *&mut pixels[get_index(x + 1, y)] += error * 7.0 / 16.0;
-//             }
-//             if y < height - 1 {
-//                 if x > 0 {
-//                     *&mut pixels[get_index(x - 1, y + 1)] += error * 3.0 / 16.0;
-//                 }
-//                 *&mut pixels[get_index(x, y + 1)] += error * 5.0 / 16.0;
-//                 if x < width - 1 {
-//                     *&mut pixels[get_index(x + 1, y + 1)] += error * 1.0 / 16.0;
-//                 }
-//             }
-//         }
-//     }
-//     pixels
-//         .iter()
-//         .copied()
-//         .map(f32_color_to_u16)
-//         .map(u16_to_rgb)
-//         .collect()
-// }
