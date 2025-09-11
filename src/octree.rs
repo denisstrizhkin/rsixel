@@ -55,11 +55,13 @@ impl Octree {
 
     fn reduce_to(&mut self, color_count: usize) -> Vec<Rgb<u8>> {
         let mut color_count_current = self.get_level(MAX_LEVEL).len();
-        for level in (2..MAX_LEVEL).rev() {
-            for node_index in 0..self.get_level(level).len() {
-                color_count_current -= self.remove_leaves(level, node_index).saturating_sub(1);
-                if color_count_current <= color_count {
-                    break;
+        if color_count_current > color_count {
+            for level in (2..MAX_LEVEL).rev() {
+                for node_index in 0..self.get_level(level).len() {
+                    color_count_current -= self.remove_leaves(level, node_index).saturating_sub(1);
+                    if color_count_current <= color_count {
+                        break;
+                    }
                 }
             }
         }
@@ -152,13 +154,7 @@ impl OctreeNode {
 }
 
 fn compare_colors(a: &Rgb<u8>, b: &Rgb<u8>) -> cmp::Ordering {
-    match a[0].cmp(&b[0]) {
-        cmp::Ordering::Equal => match a[1].cmp(&b[1]) {
-            cmp::Ordering::Equal => a[2].cmp(&b[2]),
-            other => other,
-        },
-        other => other,
-    }
+    a.0.cmp(&b.0)
 }
 
 pub struct ColorQuantizer {
@@ -173,7 +169,7 @@ impl ColorQuantizer {
             octree.insert(pixel);
         }
         let mut colors = octree.reduce_to(palette_size);
-        assert!(colors.len() <= palette_size);
+        assert!(colors.len() <= palette_size, "Color palette size exceeded");
         println!("final color palette size: {}", colors.len());
         colors.sort_by(compare_colors);
         Self { colors }
