@@ -4,12 +4,15 @@ use std::{array, iter};
 const MAX_LEVEL: u8 = 8;
 
 #[inline(always)]
-fn get_color_index(color: &Rgb<u8>, level: u8) -> usize {
+fn get_color_index(color: Rgb<u8>, level: u8) -> usize {
     let shift = MAX_LEVEL - level;
-    let r = (color[0] >> shift) & 1;
-    let g = (color[1] >> shift) & 1;
-    let b = (color[2] >> shift) & 1;
-    ((r << 2) | (g << 1) | b) as usize
+    color
+        .0
+        .into_iter()
+        .rev()
+        .enumerate()
+        .map(|(i, c)| (((c >> shift) & 1) << i) as usize)
+        .fold(0, |s, c| s | c)
 }
 
 struct Octree {
@@ -25,7 +28,7 @@ impl Octree {
         octree
     }
 
-    fn insert(&mut self, color: &Rgb<u8>) {
+    fn insert(&mut self, color: Rgb<u8>) {
         let mut current_node_id = OctreeNodeId { level: 1, index: 0 };
         while current_node_id.level < MAX_LEVEL {
             let child_index = get_color_index(color, current_node_id.level);
@@ -38,7 +41,7 @@ impl Octree {
         self.get_node_mut(current_node_id).add_color(color);
     }
 
-    fn get_index(&self, color: &Rgb<u8>) -> usize {
+    fn get_index(&self, color: Rgb<u8>) -> usize {
         let mut current_node_id = OctreeNodeId { level: 1, index: 0 };
         while !self.get_node(current_node_id).is_leaf() {
             let child_index = get_color_index(color, current_node_id.level);
@@ -46,21 +49,15 @@ impl Octree {
             current_node_id = match children[child_index] {
                 Some(child_id) => child_id,
                 None => {
-                    let shift = MAX_LEVEL - current_node_id.level;
-                    let r = (color[0] >> shift) & 1;
-                    let g = (color[1] >> shift) & 1;
-                    let b = (color[2] >> shift) & 1;
                     match children
                         .iter()
                         .enumerate()
                         .filter_map(|(i, c)| c.zip(Some(i)))
                         .map(|(c, i)| {
-                            let ir = ((i >> 2) & 1) as u8;
-                            let ig = ((i >> 1) & 1) as u8;
-                            let ib = (i & 1) as u8;
-                            (r.abs_diff(ir) + g.abs_diff(ig) + b.abs_diff(ib), c)
+                            let d = child_index ^ i;
+                            ([d >> 2, (d >> 1) & 1, d & 1].into_iter().sum::<usize>(), c)
                         })
-                        .reduce(|a, b| if b.0 < a.0 { b } else { a })
+                        .min_by(|a, b| a.0.cmp(&b.0))
                         .map(|(_, c)| c)
                     {
                         Some(child_id) => child_id,
@@ -159,8 +156,8 @@ struct OctreeNodeId {
 
 #[derive(Debug, Default, Clone)]
 struct OctreeNode {
-    color: [u64; 3],
-    count: u64,
+    color: [u32; 3],
+    count: u32,
     children: [Option<OctreeNodeId>; 8],
     index: usize,
 }
@@ -183,9 +180,9 @@ impl OctreeNode {
     }
 
     #[inline(always)]
-    fn add_color(&mut self, color: &Rgb<u8>) {
+    fn add_color(&mut self, color: Rgb<u8>) {
         self.count += 1;
-        iter::zip(&mut self.color, color.0).for_each(|(a, b)| *a += b as u64)
+        iter::zip(&mut self.color, color.0).for_each(|(a, b)| *a += b as u32)
     }
 
     #[inline(always)]
@@ -205,7 +202,7 @@ impl ColorQuantizer {
         let palette_size = palette_size.min(256);
         let mut octree = Octree::new();
         for pixel in img.pixels() {
-            octree.insert(pixel);
+            octree.insert(*pixel);
         }
         octree.reduce_to(palette_size);
         let colors = octree.finalize();
@@ -220,7 +217,7 @@ impl ColorQuantizer {
 
     #[inline(always)]
     pub fn get_index(&self, color: &Rgb<u8>) -> usize {
-        self.octree.get_index(color)
+        self.octree.get_index(*color)
     }
 }
 
