@@ -9,8 +9,8 @@ description = "Tool and library for encoding images into sixel format"
 keywords = ["lib", "cli", "sixel"]
 
 [dependencies]
-clap = { version = "4.5.20", features = ["derive"] }
-image = "0.25.5"
+clap = { version = "4.5.47", features = ["derive"] }
+image = "0.25.8"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }

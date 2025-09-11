@@ -1,4 +1,4 @@
-// use crate::median_cut::{rgb_to_u16, u16_to_rgb, ColorQuantizer, MAX_HIST_COLORS};
+// use crate::median_cut::ColorQuantizer;
 use crate::octree::ColorQuantizer;
 use image::imageops::dither;
 use image::{ImageReader, ImageResult, RgbImage};

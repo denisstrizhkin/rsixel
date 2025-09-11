@@ -338,8 +338,8 @@ impl ColorQuantizer {
         &self.colors_rgb[0..self.len()]
     }
 
-    pub fn get_index(&self, rgb: Rgb<u8>) -> usize {
-        let color = rgb_to_u16(rgb);
+    pub fn get_index(&self, rgb: &Rgb<u8>) -> usize {
+        let color = rgb_to_u16(*rgb);
         let mut index = 0;
         let mut min_diff = u32::MAX;
         let mut left = 0;
@@ -367,12 +367,12 @@ impl ColorMap for ColorQuantizer {
 
     #[inline]
     fn index_of(&self, color: &Self::Color) -> usize {
-        self.get_index(*color)
+        self.get_index(color)
     }
 
     #[inline]
     fn map_color(&self, color: &mut Self::Color) {
-        *color = self.get_palette()[self.get_index(*color)]
+        *color = self.get_palette()[self.get_index(color)]
     }
 }
 
