@@ -329,7 +329,7 @@ impl ColorQuantizer {
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.count
     }
 

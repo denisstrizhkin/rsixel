@@ -29,10 +29,9 @@ impl Octree {
         let mut current_node_id = OctreeNodeId { level: 1, index: 0 };
         while current_node_id.level < MAX_LEVEL {
             let child_index = get_color_index(color, current_node_id.level);
-            if let Some(child_id) = self.get_node(current_node_id).children[child_index] {
-                current_node_id = child_id;
-            } else {
-                current_node_id = self.insert_child(current_node_id, child_index);
+            current_node_id = match self.get_node(current_node_id).children[child_index] {
+                Some(child_id) => child_id,
+                None => self.insert_child(current_node_id, child_index),
             }
         }
         assert_eq!(current_node_id.level, MAX_LEVEL);
@@ -43,8 +42,32 @@ impl Octree {
         let mut current_node_id = OctreeNodeId { level: 1, index: 0 };
         while !self.get_node(current_node_id).is_leaf() {
             let child_index = get_color_index(color, current_node_id.level);
-            current_node_id = self.get_node(current_node_id).children[child_index]
-                .expect("Proper tree can't have dangling nodes");
+            let children = self.get_node(current_node_id).children;
+            current_node_id = match children[child_index] {
+                Some(child_id) => child_id,
+                None => {
+                    let shift = MAX_LEVEL - current_node_id.level;
+                    let r = (color[0] >> shift) & 1;
+                    let g = (color[1] >> shift) & 1;
+                    let b = (color[2] >> shift) & 1;
+                    match children
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, c)| c.zip(Some(i)))
+                        .map(|(c, i)| {
+                            let ir = ((i >> 2) & 1) as u8;
+                            let ig = ((i >> 1) & 1) as u8;
+                            let ib = (i & 1) as u8;
+                            (r.abs_diff(ir) + g.abs_diff(ig) + b.abs_diff(ib), c)
+                        })
+                        .reduce(|a, b| if b.0 < a.0 { b } else { a })
+                        .map(|(_, c)| c)
+                    {
+                        Some(child_id) => child_id,
+                        None => break,
+                    }
+                }
+            }
         }
         self.get_node(current_node_id).index
     }
