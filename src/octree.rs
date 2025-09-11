@@ -1,14 +1,15 @@
 use image::{imageops::ColorMap, Rgb, RgbImage};
-use std::{array, cmp, iter};
+use std::{array, iter};
 
 const MAX_LEVEL: u8 = 8;
 
 #[inline(always)]
 fn get_color_index(color: &Rgb<u8>, level: u8) -> usize {
-    let r = (color[0] >> (MAX_LEVEL - level)) & 1;
-    let g = (color[1] >> (MAX_LEVEL - level)) & 1;
-    let b = (color[2] >> (MAX_LEVEL - level)) & 1;
-    (r << 2 | g << 1 | b) as usize
+    let shift = MAX_LEVEL - level;
+    let r = (color[0] >> shift) & 1;
+    let g = (color[1] >> shift) & 1;
+    let b = (color[2] >> shift) & 1;
+    ((r << 2) | (g << 1) | b) as usize
 }
 
 struct Octree {
@@ -25,77 +26,85 @@ impl Octree {
     }
 
     fn insert(&mut self, color: &Rgb<u8>) {
-        let mut node_index_current = 0;
-        for level in 1..MAX_LEVEL {
-            let child_index = get_color_index(color, level);
-            if let Some(node_index) = self.get_node(level, node_index_current).children[child_index]
-            {
-                node_index_current = node_index;
+        let mut current_node_id = OctreeNodeId { level: 1, index: 0 };
+        while current_node_id.level < MAX_LEVEL {
+            let child_index = get_color_index(color, current_node_id.level);
+            if let Some(child_id) = self.get_node(current_node_id).children[child_index] {
+                current_node_id = child_id;
             } else {
-                let node_index = self.new_node(level + 1);
-                self.get_node_mut(level, node_index_current).children[child_index] =
-                    Some(node_index);
-                node_index_current = node_index;
+                current_node_id = self.insert_child(current_node_id, child_index);
             }
         }
-        self.get_node_mut(MAX_LEVEL, node_index_current)
-            .add_color(color);
+        assert_eq!(current_node_id.level, MAX_LEVEL);
+        self.get_node_mut(current_node_id).add_color(color);
     }
 
-    fn remove_leaves(&mut self, level: u8, node_index: usize) -> usize {
-        let mut cnt = 0;
-        for child_index in 0..8 {
-            if let Some(child) = self.delete_child(level, node_index, child_index) {
-                self.get_node_mut(level, node_index).add_node(&child);
-                cnt += 1;
-            }
+    fn get_index(&self, color: &Rgb<u8>) -> usize {
+        let mut current_node_id = OctreeNodeId { level: 1, index: 0 };
+        while !self.get_node(current_node_id).is_leaf() {
+            let child_index = get_color_index(color, current_node_id.level);
+            current_node_id = self.get_node(current_node_id).children[child_index]
+                .expect("Proper tree can't have dangling nodes");
         }
-        cnt
+        self.get_node(current_node_id).index
     }
 
-    fn reduce_to(&mut self, color_count: usize) -> Vec<Rgb<u8>> {
+    fn prune_node(&mut self, node_id: OctreeNodeId) -> usize {
+        std::mem::take(&mut self.get_node_mut(node_id).children)
+            .into_iter()
+            .flatten()
+            .inspect(|&child_id| {
+                let child = std::mem::take(self.get_node_mut(child_id));
+                self.get_node_mut(node_id).add_node(child);
+            })
+            .count()
+    }
+
+    fn reduce_to(&mut self, color_count: usize) {
         let mut color_count_current = self.get_level(MAX_LEVEL).len();
         if color_count_current > color_count {
-            for level in (2..MAX_LEVEL).rev() {
-                for node_index in 0..self.get_level(level).len() {
-                    color_count_current -= self.remove_leaves(level, node_index).saturating_sub(1);
+            'main: for level in (1..MAX_LEVEL).rev() {
+                for index in 0..self.get_level(level).len() {
+                    let node_id = OctreeNodeId { level, index };
+                    color_count_current -= self.prune_node(node_id).saturating_sub(1);
                     if color_count_current <= color_count {
-                        break;
+                        break 'main;
                     }
                 }
             }
         }
-        (1..=MAX_LEVEL)
-            .flat_map(|level| self.get_level(level))
-            .filter(|node| node.is_leaf())
-            .map(Rgb::from)
-            .collect()
+        assert!(
+            color_count_current <= color_count,
+            "Color palette size {color_count_current} exceeded {color_count}",
+        );
     }
 
-    fn new_node(&mut self, level: u8) -> usize {
-        let level = self.get_level_mut(level);
-        let node_index = level.len();
-        level.push(OctreeNode::default());
-        node_index
-    }
-
-    #[inline(always)]
-    fn delete_child(
-        &mut self,
-        level: u8,
-        node_index: usize,
-        child_index: usize,
-    ) -> Option<OctreeNode> {
-        assert!(child_index < 8);
-        if let Some(child_index) = self.get_node_mut(level, node_index).children[child_index].take()
-        {
-            let level = level + 1;
-            assert!(!self.get_node_mut(level, child_index).is_deleted);
-            self.get_node_mut(level, child_index).is_deleted = true;
-            Some(self.get_node(level, node_index).clone())
-        } else {
-            None
+    fn finalize(&mut self) -> Vec<Rgb<u8>> {
+        let mut palette = Vec::new();
+        for level in 1..=MAX_LEVEL {
+            for index in 0..self.get_level(level).len() {
+                let node_id = OctreeNodeId { level, index };
+                if self.get_node(node_id).is_leaf() {
+                    self.get_node_mut(node_id).index = palette.len();
+                    palette.push(Rgb::from(self.get_node(node_id)));
+                }
+            }
         }
+        palette
+    }
+
+    fn insert_child(&mut self, node_id: OctreeNodeId, child_index: usize) -> OctreeNodeId {
+        assert!(child_index < 8);
+        assert!(node_id.level < MAX_LEVEL);
+        let level = node_id.level + 1;
+        let child_id = OctreeNodeId {
+            level,
+            index: self.get_level(level).len(),
+        };
+        self.get_level_mut(level).push(OctreeNode::default());
+        assert!(self.get_node(node_id).children[child_index].is_none());
+        self.get_node_mut(node_id).children[child_index] = Some(child_id);
+        child_id
     }
 
     #[inline(always)]
@@ -109,55 +118,62 @@ impl Octree {
     }
 
     #[inline(always)]
-    fn get_node(&self, level: u8, node_index: usize) -> &OctreeNode {
-        &self.get_level(level)[node_index]
+    fn get_node(&self, node_id: OctreeNodeId) -> &OctreeNode {
+        &self.get_level(node_id.level)[node_id.index]
     }
 
     #[inline(always)]
-    fn get_node_mut(&mut self, level: u8, node_index: usize) -> &mut OctreeNode {
-        &mut self.get_level_mut(level)[node_index]
+    fn get_node_mut(&mut self, node_id: OctreeNodeId) -> &mut OctreeNode {
+        &mut self.get_level_mut(node_id.level)[node_id.index]
     }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct OctreeNodeId {
+    level: u8,
+    index: usize,
 }
 
 #[derive(Debug, Default, Clone)]
 struct OctreeNode {
-    color: [u32; 3],
-    count: u32,
-    children: [Option<usize>; 8],
-    is_deleted: bool,
+    color: [u64; 3],
+    count: u64,
+    children: [Option<OctreeNodeId>; 8],
+    index: usize,
 }
 
 impl From<&OctreeNode> for Rgb<u8> {
     #[inline(always)]
     fn from(node: &OctreeNode) -> Self {
-        Rgb::from(array::from_fn(|i| (node.color[i] / node.count) as u8))
+        if node.count == 0 {
+            Rgb::from([0, 0, 0])
+        } else {
+            Rgb::from(array::from_fn(|i| (node.color[i] / node.count) as u8))
+        }
     }
 }
 
 impl OctreeNode {
     #[inline(always)]
     fn is_leaf(&self) -> bool {
-        !self.is_deleted && self.children.iter().all(Option::is_none)
+        self.count != 0 && self.children.iter().all(Option::is_none)
     }
 
     #[inline(always)]
     fn add_color(&mut self, color: &Rgb<u8>) {
         self.count += 1;
-        iter::zip(&mut self.color, color.0).for_each(|(a, b)| *a += b as u32)
+        iter::zip(&mut self.color, color.0).for_each(|(a, b)| *a += b as u64)
     }
 
     #[inline(always)]
-    fn add_node(&mut self, node: &OctreeNode) {
+    fn add_node(&mut self, node: OctreeNode) {
         self.count += node.count;
         iter::zip(&mut self.color, node.color).for_each(|(a, b)| *a += b)
     }
 }
 
-fn compare_colors(a: &Rgb<u8>, b: &Rgb<u8>) -> cmp::Ordering {
-    a.0.cmp(&b.0)
-}
-
 pub struct ColorQuantizer {
+    octree: Octree,
     colors: Vec<Rgb<u8>>,
 }
 
@@ -168,36 +184,32 @@ impl ColorQuantizer {
         for pixel in img.pixels() {
             octree.insert(pixel);
         }
-        let mut colors = octree.reduce_to(palette_size);
-        assert!(colors.len() <= palette_size, "Color palette size exceeded");
+        octree.reduce_to(palette_size);
+        let colors = octree.finalize();
         println!("final color palette size: {}", colors.len());
-        colors.sort_by(compare_colors);
-        Self { colors }
+        Self { octree, colors }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_palette(&self) -> &[Rgb<u8>] {
         &self.colors
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_index(&self, color: &Rgb<u8>) -> usize {
-        match self.colors.binary_search_by(|c| compare_colors(c, color)) {
-            Ok(index) => index,
-            Err(index) => index.clamp(0, self.colors.len() - 1),
-        }
+        self.octree.get_index(color)
     }
 }
 
 impl ColorMap for ColorQuantizer {
     type Color = Rgb<u8>;
 
-    #[inline]
+    #[inline(always)]
     fn index_of(&self, color: &Self::Color) -> usize {
         self.get_index(color)
     }
 
-    #[inline]
+    #[inline(always)]
     fn map_color(&self, color: &mut Self::Color) {
         *color = self.get_palette()[self.get_index(color)]
     }

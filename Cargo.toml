@@ -16,7 +16,7 @@ image = "0.25.5"
 criterion = { version = "0.4", features = ["html_reports"] }
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 
 [[bench]]
 name = "encoder_from_image"
