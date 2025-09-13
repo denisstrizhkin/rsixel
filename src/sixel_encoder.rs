@@ -95,7 +95,7 @@ impl SixelEncoder {
         let mut sixel_buf = SixelBuf::default();
         for y in 0..height {
             for x in 0..width {
-                let p_i = palette.get_index(self.rgb8_img.get_pixel(x as u32, y as u32));
+                let p_i = palette.get_index(*self.rgb8_img.get_pixel(x as u32, y as u32));
                 sixel_buf.add(p_i, y);
                 if let Some(sixel) = sixel_buf.take() {
                     // eprintln!("{i}, {j}");

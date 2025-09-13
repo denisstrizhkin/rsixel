@@ -1,5 +1,4 @@
 use image::{imageops::ColorMap, Rgb, RgbImage};
-use priority_queue::PriorityQueue;
 use std::{array, collections::VecDeque, iter};
 
 const MAX_LEVEL: u8 = 8;
@@ -170,37 +169,29 @@ impl Octree {
     }
 
     fn reduce_to(&mut self, color_count: usize) {
-        let mut queue = PriorityQueue::new();
         let mut color_count_current = 0;
+        let mut queue = VecDeque::new();
         self.traverse(|_, node| {
             if node.is_leaf() {
                 color_count_current += 1;
+                queue.push_back(node.parent.unwrap());
             }
         });
         if color_count_current > color_count {
             'main: loop {
-                self.traverse(|_, node| {
-                    if node.is_leaf() {
-                        let parent_id = node.parent.unwrap();
-                        if !queue.contains(&parent_id) {
-                            let count = self
-                                .pool
-                                .get(parent_id)
-                                .children
-                                .iter()
-                                .flatten()
-                                .map(|&child_id| self.pool.get(child_id).count)
-                                .sum::<u32>();
-                            queue.push(parent_id, count);
+                while let Some(node_id) = queue.pop_front() {
+                    if !self.pool.get(node_id).is_leaf() {
+                        color_count_current -= self.prune_node(node_id) - 1;
+                        if color_count_current <= color_count {
+                            break 'main;
                         }
                     }
-                });
-                while let Some((node_id, _)) = queue.pop() {
-                    color_count_current -= self.prune_node(node_id) - 1;
-                    if color_count_current <= color_count {
-                        break 'main;
-                    }
                 }
+                self.traverse(|_, node| {
+                    if node.is_leaf() {
+                        queue.push_back(node.parent.unwrap())
+                    }
+                });
             }
         }
         assert!(
