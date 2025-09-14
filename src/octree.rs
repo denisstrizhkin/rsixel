@@ -1,22 +1,29 @@
 use image::{imageops::ColorMap, Rgb, RgbImage};
-use std::{array, collections::VecDeque, iter};
+use std::{
+    array, cmp,
+    collections::{BinaryHeap, VecDeque},
+    iter,
+};
+
+use crate::queue::Queue;
 
 const MAX_LEVEL: u8 = 8;
+const MAX_NODES: usize = 1536;
+const MAX_COLORS: usize = 256;
 
 #[derive(Debug, Default)]
 struct Node {
     rgb: [u32; 3],
     count: u32,
-    index: usize,
+    index: u8,
+    level: u8,
+    children_count: u8,
+    is_leaf: bool,
     parent: Option<u32>,
     children: [Option<u32>; 8],
 }
 
 impl Node {
-    fn is_leaf(&self) -> bool {
-        !self.children.iter().any(Option::is_some)
-    }
-
     fn merge_color(&mut self, color: Rgb<u8>) {
         self.count += 1;
         iter::zip(&mut self.rgb, color.0).for_each(|(a, b)| *a += b as u32)
@@ -28,16 +35,24 @@ impl Node {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Pool {
-    nodes: Vec<Node>,
+    nodes: [Node; MAX_NODES],
+    ids: Queue<u32, MAX_NODES>,
 }
 
 impl Pool {
+    fn new() -> Self {
+        let mut ids = Queue::new();
+        let nodes = array::from_fn(|i| {
+            ids.push(i as u32);
+            Node::default()
+        });
+        Self { nodes, ids }
+    }
+
     fn create(&mut self) -> u32 {
-        let id = self.nodes.len();
-        self.nodes.push(Node::default());
-        id as u32
+        self.ids.pop().unwrap()
     }
 
     fn get(&self, id: u32) -> &Node {
@@ -49,6 +64,7 @@ impl Pool {
     }
 
     fn delete(&mut self, id: u32) -> Node {
+        self.ids.push(id);
         std::mem::take(&mut self.nodes[id as usize])
     }
 }
@@ -64,16 +80,65 @@ fn get_color_index(color: Rgb<u8>, level: u8) -> usize {
         .fold(0, |s, c| s | c)
 }
 
+#[derive(Debug)]
+struct Reducible {
+    node_id: u32,
+    level: u8,
+    count: u32,
+}
+
+impl Reducible {
+    fn new(node_id: u32, node: &Node) -> Self {
+        Self {
+            node_id,
+            level: node.level,
+            count: node.count,
+        }
+    }
+}
+
+impl Eq for Reducible {}
+
+impl cmp::PartialEq for Reducible {
+    fn eq(&self, other: &Self) -> bool {
+        self.level.eq(&other.level) && self.count.eq(&other.count)
+    }
+}
+
+impl cmp::Ord for Reducible {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.level
+            .cmp(&other.level)
+            .then(self.count.cmp(&other.count))
+    }
+}
+
+impl cmp::PartialOrd for Reducible {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 struct Octree {
     pool: Pool,
     root: u32,
+    reducible: BinaryHeap<Reducible>,
+    color_count: usize,
+    leaf_count: usize,
 }
 
 impl Octree {
-    fn new() -> Self {
-        let mut pool = Pool::default();
+    fn new(color_count: usize) -> Self {
+        let mut pool = Pool::new();
         let root = pool.create();
-        Self { pool, root }
+        pool.get_mut(root).is_leaf = true;
+        Self {
+            pool,
+            root,
+            reducible: BinaryHeap::new(),
+            color_count,
+            leaf_count: 1,
+        }
     }
 
     pub fn traverse<F>(&self, f: F)
@@ -116,20 +181,36 @@ impl Octree {
                 Some(child_id) => child_id,
                 None => {
                     let child_id = self.pool.create();
-                    self.pool.get_mut(child_id).parent = Some(node_id);
-                    self.pool.get_mut(node_id).children[child_index] = Some(child_id);
+                    {
+                        let child = self.pool.get_mut(child_id);
+                        child.level = level;
+                        child.parent = Some(node_id);
+                        child.is_leaf = true;
+                        self.leaf_count += 1;
+                    }
+                    {
+                        let parent = self.pool.get_mut(node_id);
+                        parent.children_count += 1;
+                        parent.children[child_index] = Some(child_id);
+                        if parent.is_leaf {
+                            parent.is_leaf = false;
+                            self.leaf_count -= 1;
+                            self.reducible.push(Reducible::new(node_id, &parent));
+                        }
+                    }
                     child_id
                 }
             }
         }
         self.pool.get_mut(node_id).merge_color(color);
+        self.reduce();
     }
 
     fn get_index(&self, color: Rgb<u8>) -> usize {
         let mut node_id = self.root;
         for level in 1..=MAX_LEVEL {
             let node = self.pool.get(node_id);
-            if node.is_leaf() {
+            if node.is_leaf {
                 break;
             }
             let child_index = get_color_index(color, level);
@@ -154,57 +235,40 @@ impl Octree {
                 }
             }
         }
-        self.pool.get(node_id).index
+        self.pool.get(node_id).index as usize
     }
 
-    fn prune_node(&mut self, node_id: u32) -> usize {
-        std::mem::take(&mut self.pool.get_mut(node_id).children)
-            .into_iter()
-            .flatten()
-            .map(|child_id| {
-                let child = self.pool.delete(child_id);
-                self.pool.get_mut(node_id).merge_node(child);
-            })
-            .count()
+    fn prune_node(&mut self, node_id: u32) {
+        let children = {
+            let node = self.pool.get_mut(node_id);
+            node.is_leaf = true;
+            self.leaf_count -= (node.children_count as usize) - 1;
+            node.children_count = 0;
+            std::mem::take(&mut node.children)
+        };
+        for child_id in children.into_iter().flatten() {
+            let child = self.pool.delete(child_id);
+            self.pool.get_mut(node_id).merge_node(child);
+        }
     }
 
-    fn reduce_to(&mut self, color_count: usize) {
-        let mut color_count_current = 0;
-        let mut queue = VecDeque::new();
-        self.traverse(|_, node| {
-            if node.is_leaf() {
-                color_count_current += 1;
-                queue.push_back(node.parent.unwrap());
-            }
-        });
-        if color_count_current > color_count {
-            'main: loop {
-                while let Some(node_id) = queue.pop_front() {
-                    if !self.pool.get(node_id).is_leaf() {
-                        color_count_current -= self.prune_node(node_id) - 1;
-                        if color_count_current <= color_count {
-                            break 'main;
-                        }
-                    }
+    fn reduce(&mut self) {
+        if self.leaf_count > self.color_count {
+            while let Some(reducible) = self.reducible.pop() {
+                self.prune_node(reducible.node_id);
+                if self.leaf_count <= self.color_count {
+                    break;
                 }
-                self.traverse(|_, node| {
-                    if node.is_leaf() {
-                        queue.push_back(node.parent.unwrap())
-                    }
-                });
             }
         }
-        assert!(
-            color_count_current <= color_count,
-            "Color palette size {color_count_current} exceeded {color_count}",
-        );
     }
 
     fn finalize(&mut self) -> Vec<Rgb<u8>> {
+        println!("leaves: {}", self.leaf_count);
         let mut palette = Vec::new();
         self.traverse_mut(|_, node| {
-            if node.is_leaf() {
-                node.index = palette.len();
+            if node.is_leaf {
+                node.index = palette.len() as u8;
                 palette.push(Rgb::from(array::from_fn(|i| {
                     (node.rgb[i] / node.count) as u8
                 })));
@@ -221,12 +285,11 @@ pub struct ColorQuantizer {
 
 impl ColorQuantizer {
     pub fn from(img: &RgbImage, palette_size: usize) -> Self {
-        let palette_size = palette_size.min(256);
-        let mut octree = Octree::new();
+        let palette_size = palette_size.min(MAX_COLORS);
+        let mut octree = Octree::new(palette_size);
         for pixel in img.pixels() {
             octree.insert(*pixel);
         }
-        octree.reduce_to(palette_size);
         let colors = octree.finalize();
         println!("final color palette size: {}", colors.len());
         Self { octree, colors }
@@ -254,5 +317,21 @@ impl ColorMap for ColorQuantizer {
     #[inline(always)]
     fn map_color(&self, color: &mut Self::Color) {
         *color = self.get_palette()[self.get_index(*color)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_octree() {
+        let mut octree = Octree::new(3);
+        octree.insert(Rgb::from([1, 2, 3]));
+        octree.insert(Rgb::from([200, 2, 3]));
+        octree.insert(Rgb::from([1, 200, 3]));
+        assert_eq!(octree.leaf_count, 3);
+        octree.insert(Rgb::from([1, 2, 200]));
+        assert!(octree.leaf_count <= 3);
     }
 }
