@@ -1,14 +1,11 @@
 use image::{imageops::ColorMap, Rgb, RgbImage};
-use std::{
-    array, cmp,
-    collections::{BinaryHeap, VecDeque},
-    iter,
-};
+use std::{array, collections::VecDeque, iter};
 
 use crate::queue::Queue;
 
-const MAX_LEVEL: u8 = 8;
-const MAX_NODES: usize = 1536;
+const MAX_LEVEL: u8 = 6;
+const MAX_NODES: usize = 768;
+const MAX_REDUCIBLE: usize = 256;
 const MAX_COLORS: usize = 256;
 
 #[derive(Debug, Default)]
@@ -70,7 +67,7 @@ impl Pool {
 }
 
 fn get_color_index(color: Rgb<u8>, level: u8) -> usize {
-    let shift = MAX_LEVEL - level;
+    let shift = 8 - level;
     color
         .0
         .into_iter()
@@ -82,47 +79,34 @@ fn get_color_index(color: Rgb<u8>, level: u8) -> usize {
 
 #[derive(Debug)]
 struct Reducible {
-    node_id: u32,
-    level: u8,
-    count: u32,
+    levels: [Queue<u32, MAX_REDUCIBLE>; MAX_LEVEL as usize],
 }
 
 impl Reducible {
-    fn new(node_id: u32, node: &Node) -> Self {
+    fn new() -> Self {
         Self {
-            node_id,
-            level: node.level,
-            count: node.count,
+            levels: array::from_fn(|_| Queue::new()),
         }
     }
-}
 
-impl Eq for Reducible {}
-
-impl cmp::PartialEq for Reducible {
-    fn eq(&self, other: &Self) -> bool {
-        self.level.eq(&other.level) && self.count.eq(&other.count)
+    fn push(&mut self, node_id: u32, level: u8) {
+        self.levels[level as usize].push(node_id);
     }
-}
 
-impl cmp::Ord for Reducible {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.level
-            .cmp(&other.level)
-            .then(self.count.cmp(&other.count))
-    }
-}
-
-impl cmp::PartialOrd for Reducible {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
+    fn pop(&mut self) -> Option<u32> {
+        for level in self.levels.iter_mut().rev() {
+            if let Some(node_id) = level.pop() {
+                return Some(node_id);
+            }
+        }
+        None
     }
 }
 
 struct Octree {
     pool: Pool,
     root: u32,
-    reducible: BinaryHeap<Reducible>,
+    reducible: Reducible,
     color_count: usize,
     leaf_count: usize,
 }
@@ -135,7 +119,7 @@ impl Octree {
         Self {
             pool,
             root,
-            reducible: BinaryHeap::new(),
+            reducible: Reducible::new(),
             color_count,
             leaf_count: 1,
         }
@@ -195,7 +179,7 @@ impl Octree {
                         if parent.is_leaf {
                             parent.is_leaf = false;
                             self.leaf_count -= 1;
-                            self.reducible.push(Reducible::new(node_id, &parent));
+                            self.reducible.push(node_id, parent.level);
                         }
                     }
                     child_id
@@ -254,8 +238,8 @@ impl Octree {
 
     fn reduce(&mut self) {
         if self.leaf_count > self.color_count {
-            while let Some(reducible) = self.reducible.pop() {
-                self.prune_node(reducible.node_id);
+            while let Some(node_id) = self.reducible.pop() {
+                self.prune_node(node_id);
                 if self.leaf_count <= self.color_count {
                     break;
                 }
