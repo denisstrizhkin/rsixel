@@ -4,4 +4,4 @@ mod queue;
 pub mod sixel_encoder;
 
 pub use median_cut::MAX_PALETTE_COLORS;
-pub use sixel_encoder::SixelEncoder;
+pub use sixel_encoder::EncoderBuilder;

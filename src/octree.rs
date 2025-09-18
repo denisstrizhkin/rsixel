@@ -1,5 +1,6 @@
 use image::{imageops::ColorMap, Rgb, RgbImage};
-use std::{array, collections::VecDeque, iter};
+use log::debug;
+use std::{array, iter};
 
 use crate::queue::Queue;
 
@@ -130,13 +131,13 @@ impl Octree {
         F: FnMut(u32, &Node),
     {
         let mut f = f;
-        let mut queue = VecDeque::new();
-        queue.push_back(self.root);
-        while let Some(node_id) = queue.pop_front() {
+        let mut queue = Queue::<u32, MAX_NODES>::new();
+        queue.push(self.root);
+        while let Some(node_id) = queue.pop() {
             let node = self.pool.get(node_id);
             f(node_id, node);
             for child_id in node.children.iter().flatten() {
-                queue.push_back(*child_id);
+                queue.push(*child_id);
             }
         }
     }
@@ -146,13 +147,13 @@ impl Octree {
         F: FnMut(u32, &mut Node),
     {
         let mut f = f;
-        let mut queue = VecDeque::new();
-        queue.push_back(self.root);
-        while let Some(node_id) = queue.pop_front() {
+        let mut queue = Queue::<u32, MAX_NODES>::new();
+        queue.push(self.root);
+        while let Some(node_id) = queue.pop() {
             let node = self.pool.get_mut(node_id);
             f(node_id, node);
             for child_id in node.children.iter().flatten() {
-                queue.push_back(*child_id);
+                queue.push(*child_id);
             }
         }
     }
@@ -248,7 +249,7 @@ impl Octree {
     }
 
     fn finalize(&mut self) -> Vec<Rgb<u8>> {
-        println!("leaves: {}", self.leaf_count);
+        debug!("Octree leaves: {}", self.leaf_count);
         let mut palette = Vec::new();
         self.traverse_mut(|_, node| {
             if node.is_leaf {
@@ -275,7 +276,7 @@ impl ColorQuantizer {
             octree.insert(*pixel);
         }
         let colors = octree.finalize();
-        println!("final color palette size: {}", colors.len());
+        debug!("Final color palette size: {}", colors.len());
         Self { octree, colors }
     }
 
