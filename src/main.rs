@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::try_parse()?;
     debug!("Recieved args: {args:#?}");
-    let mut sixel_encoder = EncoderBuilder::new(&args.img).debug(args.debug).build()?;
+    let sixel_encoder = EncoderBuilder::new(&args.img).debug(args.debug).build()?;
     sixel_encoder.image_to_sixel(&mut io::stdout().lock(), args.palette_size, args.dither)?;
     Ok(())
 }

@@ -1,6 +1,5 @@
 use std::array;
 use std::fmt;
-use std::mem;
 
 pub struct Queue<T, const N: usize>
 where
