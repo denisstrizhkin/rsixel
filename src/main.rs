@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use log::debug;
-use rsixel::{EncoderBuilder, MAX_PALETTE_COLORS};
+use rsixel::{EncoderBuilder, OctreeQuantizer, MAX_COLORS};
 use std::{io, path::PathBuf};
 
 /// Convert image to sixel format
@@ -12,7 +12,7 @@ struct Args {
     img: PathBuf,
 
     /// Color palette size
-    #[arg(short, long, default_value_t=MAX_PALETTE_COLORS)]
+    #[arg(short, long, default_value_t=MAX_COLORS)]
     palette_size: usize,
 
     /// Use dithering
@@ -28,7 +28,9 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::try_parse()?;
     debug!("Recieved args: {args:#?}");
-    let sixel_encoder = EncoderBuilder::new(&args.img).debug(args.debug).build()?;
+    let sixel_encoder = EncoderBuilder::<OctreeQuantizer>::new(&args.img)
+        .debug(args.debug)
+        .build()?;
     sixel_encoder.image_to_sixel(&mut io::stdout().lock(), args.palette_size, args.dither)?;
     Ok(())
 }

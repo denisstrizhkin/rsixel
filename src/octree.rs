@@ -1,13 +1,12 @@
-use image::{imageops::ColorMap, Rgb, RgbImage};
+use image::{Rgb, RgbImage};
 use log::debug;
 use std::{array, iter};
 
 use crate::queue::Queue;
+use crate::{Palette, Quantizer, MAX_COLORS};
 
 const MAX_LEVEL: u8 = 6;
 const MAX_NODES: usize = 768;
-const MAX_REDUCIBLE: usize = 256;
-const MAX_COLORS: usize = 256;
 
 #[derive(Debug, Default)]
 struct Node {
@@ -80,7 +79,7 @@ fn get_color_index(color: Rgb<u8>, level: u8) -> usize {
 
 #[derive(Debug)]
 struct Reducible {
-    levels: [Queue<u32, MAX_REDUCIBLE>; MAX_LEVEL as usize],
+    levels: [Queue<u32, MAX_COLORS>; MAX_LEVEL as usize],
 }
 
 impl Reducible {
@@ -248,9 +247,9 @@ impl Octree {
         }
     }
 
-    fn finalize(&mut self) -> Vec<Rgb<u8>> {
+    fn finalize(&mut self) -> Palette {
         debug!("Octree leaves: {}", self.leaf_count);
-        let mut palette = Vec::new();
+        let mut palette = Palette::default();
         self.traverse_mut(|_, node| {
             if node.is_leaf {
                 node.index = palette.len() as u8;
@@ -263,45 +262,18 @@ impl Octree {
     }
 }
 
-pub struct ColorQuantizer {
-    octree: Octree,
-    colors: Vec<Rgb<u8>>,
-}
+pub struct OctreeQuantizer {}
 
-impl ColorQuantizer {
-    pub fn from(img: &RgbImage, palette_size: usize) -> Self {
-        let palette_size = palette_size.min(MAX_COLORS);
-        let mut octree = Octree::new(palette_size);
+impl Quantizer for OctreeQuantizer {
+    fn quantize(img: &RgbImage, color_count: usize) -> Palette {
+        let color_count = color_count.min(MAX_COLORS);
+        let mut octree = Octree::new(color_count);
         for pixel in img.pixels() {
             octree.insert(*pixel);
         }
-        let colors = octree.finalize();
-        debug!("Final color palette size: {}", colors.len());
-        Self { octree, colors }
-    }
-
-    #[inline(always)]
-    pub fn get_palette(&self) -> &[Rgb<u8>] {
-        &self.colors
-    }
-
-    #[inline(always)]
-    pub fn get_index(&self, color: Rgb<u8>) -> usize {
-        self.octree.get_index(color)
-    }
-}
-
-impl ColorMap for ColorQuantizer {
-    type Color = Rgb<u8>;
-
-    #[inline(always)]
-    fn index_of(&self, color: &Self::Color) -> usize {
-        self.get_index(*color)
-    }
-
-    #[inline(always)]
-    fn map_color(&self, color: &mut Self::Color) {
-        *color = self.get_palette()[self.get_index(*color)]
+        let palette = octree.finalize();
+        debug!("Final color palette size: {}", palette.len());
+        palette
     }
 }
 

@@ -734,6 +734,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuina"
+version = "0.1.0"
+source = "git+https://github.com/denisstrizhkin/kuina.git#5a20753cc4dae3c8a7e810ffc8360ca8140238e4"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1191,8 +1196,16 @@ dependencies = [
  "env_logger",
  "image",
  "itertools 0.14.0",
+ "kuina",
  "log",
+ "rustc-hash",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "ryu"

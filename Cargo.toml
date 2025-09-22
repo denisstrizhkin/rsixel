@@ -14,7 +14,9 @@ clap = { version = "4.5.47", features = ["derive"] }
 env_logger = "0.11.8"
 image = "0.25.8"
 itertools = "0.14.0"
+kuina = { git = "https://github.com/denisstrizhkin/kuina.git", version = "0.1.0" }
 log = "0.4.28"
+rustc-hash = "2.1.1"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
